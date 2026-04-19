@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-100 font-sans text-gray-800;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold;
+  }
+  h1 {
+    @apply text-2xl;
+  }
+  h2 {
+    @apply text-xl;
+  }
+  h3 {
+    @apply text-lg;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-blue-600;
+  }
+  .btn-secondary {
+    @apply bg-secondary text-white hover:bg-gray-600;
+  }
+  .btn-success {
+    @apply bg-success text-white hover:bg-green-600;
+  }
+  .btn-danger {
+    @apply bg-danger text-white hover:bg-red-600;
+  }
+  .card {
+    @apply bg-white rounded shadow p-4;
+  }
+  .nav-link {
+    @apply block px-4 py-2 rounded hover:bg-gray-200 transition-colors;
+  }
+  .nav-link.active {
+    @apply bg-primary text-white;
+  }
+  .form-input {
+    @apply border rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-primary;
+  }
+  .form-label {
+    @apply block mb-1 font-medium;
+  }
+  .form-group {
+    @apply mb-4;
+  }
+  .status-success {
+    @apply text-success;
+  }
+  .status-error {
+    @apply text-danger;
+  }
+  .status-info {
+    @apply text-info;
+  }
+  .status-warning {
+    @apply text-warning;
+  }
+}

@@ -1,209 +1,45 @@
-from fastapi import FastAPI, HTTPException
+"""FastAPI应用入口"""
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from fastapi.responses import FileResponse
+import os
 import subprocess
 import time
-import pandas as pd
-import os
 import threading
 import math
 import re
-import sys
-import openpyxl
-from collections import Counter
 
-# 导入图片验证功能
-from Chick import verify_image_match
-
-# 定义所有合法的按键名称
-VALID_KEYS = {
-    "OK", "RIGHT", "UP", "LEFT", "DOWN", "SETTING", "HOME", "POWER", "BACK",
-    "SOURCE", "MENU", "CHUP", "CHDOWN", "DIGITAL", "EXITMENU", "DIGITAL1",
-    "DIGITAL2", "DIGITAL3", "DIGITAL4", "DIGITAL5", "DIGITAL6", "DIGITAL7",
-    "DIGITAL8", "DIGITAL9", "DIGITAL0", "LIBRARY", "TV_AV", "VOLUMEUP",
-    "VOLUMEDOWN", "NETFLIX", "YOUTUBE", "PRIME_VIDEO", "ACTION3", "APPS", "FILES", "MUTE"
-}
-
-def validate_excel_file(file_path):
-    """验证 Excel 文件的格式和内容"""
-    try:
-        wb = openpyxl.load_workbook(file_path)
-        sheet = wb.active
-    except Exception as e:
-        return {"success": False, "errors": [f"无法打开Excel文件: {e}"]}
-    
-    errors = []
-    warnings = []
-    
-    # 验证C列值是否唯一
-    c_values = []
-    for i in range(2, sheet.max_row + 1):
-        cell_value = sheet.cell(row=i, column=3).value
-        if cell_value is not None:
-            c_values.append(str(cell_value))
-    
-    if len(c_values) != len(set(c_values)):
-        duplicates = [item for item, count in Counter(c_values).items() if count > 1]
-        errors.append(f"C列值不唯一，重复的值有: {', '.join(duplicates)}")
-    
-    # 验证F和G列格式（按键名/次数/时间，多个用逗号分隔）
-    for col in ["F", "G"]:
-        col_idx = openpyxl.utils.column_index_from_string(col)
-        for row in range(2, sheet.max_row + 1):
-            cell_value = str(sheet.cell(row=row, column=col_idx).value)
-            if cell_value == "None" or not cell_value.strip():
-                continue
-            
-            # 检查结尾是否有多余的逗号
-            if cell_value.strip().endswith(","):
-                errors.append(f"{col}{row} 结尾有多余的逗号: '{cell_value.strip()}'")
-            
-            # 检查每个命令段
-            commands = [cmd.strip() for cmd in cell_value.split(",") if cmd.strip()]
-            for cmd in commands:
-                parts = cmd.split("/")
-                if len(parts) != 3:
-                    errors.append(f"{col}{row} 命令 '{cmd}' 格式应为 KEY/COUNT/TIME")
-                    continue
-                
-                key, count, time_val = parts
-                if key not in VALID_KEYS:
-                    errors.append(f"{col}{row} 按键名称 '{key}' 无效")
-                
-                if not count.isdigit() or int(count) <= 0:
-                    errors.append(f"{col}{row} 按键次数 '{count}' 必须为正整数")
-                
-                try:
-                    float(time_val)
-                except ValueError:
-                    errors.append(f"{col}{row} 时间参数 '{time_val}' 必须为数字")
-    
-    # 验证I列格式（*.png）
-    for row in range(2, sheet.max_row + 1):
-        cell_value = str(sheet.cell(row=row, column=9).value)
-        if cell_value == "None" or not cell_value.strip():
-            continue
-        
-        if not cell_value.lower().endswith(".png"):
-            errors.append(f"I{row} 必须为PNG文件格式，当前值: {cell_value}")
-    
-    # 验证J列格式（(数字,数字)）使用英文括号和逗号
-    for row in range(2, sheet.max_row + 1):
-        cell_value = str(sheet.cell(row=row, column=10).value)
-        if cell_value == "None" or not cell_value.strip():
-            continue
-        
-        # 检查英文括号和逗号
-        if not (cell_value.startswith("(") and cell_value.endswith(")") and "," in cell_value):
-            errors.append(f"J{row} 必须使用英文括号和逗号，格式应为(数字,数字)，当前值: {cell_value}")
-            continue
-        
-        # 提取数字部分
-        try:
-            num_part = cell_value[1:-1]  # 去掉括号
-            num1, num2 = [num.strip() for num in num_part.split(",", 1)]
-            float(num1)
-            float(num2)
-        except ValueError:
-            errors.append(f"J{row} 包含非数字内容，当前值: {cell_value}")
-    
-    return {
-        "success": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "total_rows": sheet.max_row - 1 if sheet.max_row > 1 else 0
-    }
-
-# 定义请求模型
-class DeviceSelectRequest(BaseModel):
-    device_index: int
-
-class CommandExecuteRequest(BaseModel):
-    commands: str
-
-class SingleCommandExecuteRequest(BaseModel):
-    command: str
-
-class ExcelExecuteRequest(BaseModel):
-    file_name: str
-    row_index: int
-class AppendSequenceRequest(BaseModel):
-    file_name: str
-    sequence: str
-class WriteCellRequest(BaseModel):
-    file_name: str
-    column_name: str
-    row_index: int
-    value: str
+from app.config import settings
+from app.api import devices_router, excel_router, execution_router
+from app.utils.adb_controller import ADBController
 
 app = FastAPI(
-    title="ADB Control API",
-    description="ADB设备控制和命令执行API",
-    version="1.0.0"
+    title=settings.PROJECT_NAME,
+    description=settings.DESCRIPTION,
+    version=settings.VERSION
 )
 
-# 配置CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 在生产环境中应该设置具体的前端域名
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Keycode 映射表
-KEYCODE_MAP = {
-    "OK": 23,  # ENTER 键
-    "HOME": 3,
-    "BACK": 4,
-    "UP": 19,  # KEYCODE_DPAD_UP
-    "DOWN": 20,  # KEYCODE_DPAD_DOWN
-    "LEFT": 21,  # KEYCODE_DPAD_LEFT
-    "RIGHT": 22,  # KEYCODE_DPAD_RIGHT
-    "MENU": 82,
-    "SETTING": 176,
-    "DIGITAL0": 7,
-    "DIGITAL1": 8,
-    "DIGITAL2": 9,
-    "DIGITAL3": 10,
-    "DIGITAL4": 11,
-    "DIGITAL5": 12,
-    "DIGITAL6": 13,
-    "DIGITAL7": 14,
-    "DIGITAL8": 15,
-    "DIGITAL9": 16,
-    "APPS": 360,
-    # 新增按键
-    "POWER": 26,
-    "SOURCE": 178,
-    "CHUP": 82,
-    "CHDOWN": 166,
-    "EXIT": 167,
-    "LIBRARY": 358,
-    "TV_AV": 24,
-    "VOLUMEUP": 24,
-    "VOLUMEDOWN": 25,
-    "NETFLIX": 132,
-    "YOUTUBE": 131,
-    "PRIME_VII": 134,
-    "ACTIONS": 222,
-    "FILES": 359,
-    "RED": 1,
-    "GREEN": 2,
-    "YELLOW": 3,
-    "BLUE": 4,
-    "INFORMATION": 7,
-    "MUTE": 164
-}
+app.include_router(devices_router)
+app.include_router(excel_router)
+app.include_router(execution_router)
 
-# 全局变量
+controller = ADBController()
+
 current_device = None
 monitor_active = False
 monitor_stopping = False
 monitor_live_sequence = ''
 monitor_dataset_latest = ''
+monitor_last_error = ''
 monitor_last_error = ''
 monitor_thread = None
 last_key = None
@@ -213,6 +49,7 @@ monitor_device = ''
 pressed_keys = {}
 prev_key_name = None
 prev_up_time = 0.0
+
 KEY_CUSTOM_MAPPING = {
     "00fc": "SOURCE",
     "TAB": "BACK",
@@ -301,10 +138,8 @@ def monitor_key_events():
                             current_time = time.time()
                             if s in ('DOWN', '1'):
                                 monitor_start_time = current_time
-                                # 去抖：同键短时间重复DOWN忽略
                                 if pressed_keys.get(custom_key, False) and (current_time - last_key_time < 0.2):
                                     continue
-                                # 在新按键开始时，回填上一键的延迟（上一次UP到这次DOWN）
                                 if prev_key_name is not None:
                                     base_time = prev_up_time if prev_up_time > 0 else last_key_time
                                     delay_for_prev = max(0, math.ceil(current_time - base_time))
@@ -346,832 +181,62 @@ def monitor_key_events():
                 pass
         monitor_active = False
 
-class ADBController:
-    def __init__(self):
-        self.device_serial = None
+@app.get("/")
+async def root():
+    """根路径"""
+    return {"message": "ADB Control API", "version": settings.VERSION}
 
-    def list_devices(self):
-        """列出所有连接的ADB设备"""
-        try:
-            result = subprocess.run("adb devices", shell=True, check=True, capture_output=True, text=True)
-            lines = result.stdout.splitlines()
-            devices = []
+@app.get("/api/health")
+async def health_check():
+    """健康检查"""
+    return {"status": "healthy"}
 
-            for line in lines[1:]:  # 跳过第一行标题
-                if line.strip() and "device" in line:
-                    serial = line.split('\t')[0]
-                    devices.append(serial)
-
-            return devices
-        except subprocess.CalledProcessError as e:
-            print(f"获取设备列表失败: {e}")
-            return []
-
-    def select_device(self, device_serial):
-        """选择要连接的ADB设备"""
-        self.device_serial = device_serial
-        return True
-
-    def send_keyevent(self, keycode, keyname, delay=0):
-        """发送ADB keyevent并可选延迟"""
-        if not 1 <= keycode <= 999:
-            raise ValueError("Keycode must be between 1 and 999")
-
-        # 添加设备序列号参数
-        device_arg = f"-s {self.device_serial} " if self.device_serial else ""
-        command = f"adb {device_arg}shell input keyevent {keycode}"
-
-        try:
-            subprocess.run(command, shell=True, check=True)
-            print(f"已发送: {keyname}")
-            if delay > 0:
-                time.sleep(delay)
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"发送 {keyname} ({keycode}) 失败: {e}")
-            return False
-
-    def execute_commands(self, command_sequence):
-        """执行多条ADB命令"""
-        commands = command_sequence.split(',')
-        results = []
-        
-        for cmd in commands:
-            try:
-                parts = cmd.strip().split('/')
-                if len(parts) != 3:
-                    results.append({"status": "error", "message": f"命令格式错误: {cmd}"})
-                    continue
-                
-                keyname, repeat, delay = parts
-                keyname = keyname.upper()
-                repeat = int(repeat)
-                delay = float(delay)
-                
-                if keyname not in KEYCODE_MAP:
-                    results.append({"status": "error", "message": f"未知按键: {keyname}"})
-                    continue
-                
-                keycode = KEYCODE_MAP[keyname]
-                for _ in range(repeat):
-                    success = self.send_keyevent(keycode, keyname, delay)
-                    if success:
-                        results.append({"status": "success", "message": f"已发送: {keyname}"})
-                    else:
-                        results.append({"status": "error", "message": f"发送失败: {keyname}"})
-                        break
-            except ValueError as e:
-                results.append({"status": "error", "message": f"命令执行错误: {e}"})
-        
-        return results
-    
-    def take_screenshot(self, title=None):
-        """使用ADB截图（更稳健，支持/data/local/tmp，带重试）"""
-        device_arg = f"-s {self.device_serial} " if self.device_serial else ""
-        if title:
-            # 使用用例标题作为文件名，移除可能的非法字符
-            safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)
-            local_path = f"{safe_title}.png"
-        else:
-            ts = int(time.time() * 1000)
-            local_path = f"screenshot_{ts}.png"
-        remote_candidates = [
-            f"/data/local/tmp/{os.path.basename(local_path)}",
-            f"/sdcard/{os.path.basename(local_path)}",
-        ]
-        for remote_path in remote_candidates:
-            try:
-                cmd_cap = f"adb {device_arg}shell screencap -p {remote_path}"
-                subprocess.run(cmd_cap, shell=True, check=True)
-                time.sleep(0.1)
-                cmd_pull = f"adb {device_arg}pull {remote_path} {local_path}"
-                subprocess.run(cmd_pull, shell=True, check=True)
-                # 尝试删除远端文件（忽略失败）
-                try:
-                    subprocess.run(f"adb {device_arg}shell rm {remote_path}", shell=True)
-                except Exception:
-                    pass
-                # 不再限制留存图片数量
-                # 移除了自动清理旧截图的逻辑，所有截图都会被保留
-                print(f"截图成功，保存到: {local_path}")
-                return local_path
-            except subprocess.CalledProcessError as e:
-                print(f"截图失败（尝试 {remote_path}）: {e}")
-                time.sleep(0.2)
-                continue
-        return None
-
-    def read_excel_commands(self, excel_path, target_row=None):
-        """读取Excel文件中的命令"""
-        try:
-            # 读取Excel文件
-            df = pd.read_excel(excel_path)
-            
-            # 构建命令序列
-            commands = []
-            valid_rows = []
-            skipped_rows = []
-            
-            # 检查是否是SmartTV模板格式
-            if 'preScript' in df.columns:
-                print("检测到SmartTV模板格式，正在解析preScript列...")
-                
-                # 首先收集所有有效行
-                all_valid_rows = []
-                for index, row in df.iterrows():
-                    # 只处理runOption为Y的行
-                    if 'runOption' in df.columns and str(row['runOption']).upper() != 'Y':
-                        skipped_rows.append({"row": index+2, "reason": f"runOption不是Y (值为: {str(row['runOption'])})"})
-                        continue
-                    
-                    # 检查oriStep和preScript列
-                    ori_step = str(row.get('oriStep', '')).strip()
-                    pre_script = str(row.get('preScript', '')).strip()
-                    
-                    if not ori_step and not pre_script:
-                        skipped_rows.append({"row": index+2, "reason": "oriStep和preScript列都为空，用例未识别"})
-                        continue
-                    
-                    # 合并oriStep和preScript中的命令
-                    combined_commands = []
-                    
-                    # 解析oriStep列中的命令
-                    if ori_step:
-                        ori_commands = ori_step.split(',')
-                        for cmd in ori_commands:
-                            cmd = cmd.strip()
-                            if not cmd:
-                                continue
-                            combined_commands.append(cmd)
-                    # 解析preScript列中的命令
-                    if pre_script:
-                        pre_commands = pre_script.split(',')
-                        for cmd in pre_commands:
-                            cmd = cmd.strip()
-                            if not cmd:
-                                continue
-                            combined_commands.append(cmd)
-                    
-                    # 检查合并后的命令
-                    has_valid_command = False
-                    for cmd in combined_commands:
-                        try:
-                            parts = cmd.split('/')
-                            if len(parts) == 3:
-                                keyname = parts[0].upper()
-                                repeat = int(parts[1])
-                                delay = float(parts[2])
-                                
-                                # 验证按键名称
-                                if keyname in KEYCODE_MAP:
-                                    has_valid_command = True
-                        except ValueError:
-                            pass
-                    
-                    if has_valid_command:
-                        # 获取用例标题、操作步骤和校验图片
-                        title = ''
-                        step = ''
-                        verify_image = ''
-                        test_result = ''
-                        
-                        # 获取testID
-                        if 'testID' in row:
-                            test_id_value = row['testID']
-                            if test_id_value is not None and str(test_id_value).strip() != '' and str(test_id_value).strip() != 'nan':
-                                title = str(test_id_value).strip()
-                        
-                        # 获取step
-                        if 'step' in row:
-                            step_value = row['step']
-                            if step_value is not None and str(step_value).strip() != '' and str(step_value).strip() != 'nan':
-                                step = str(step_value).strip()
-                        elif 'operation' in row:
-                            operation_value = row['operation']
-                            if operation_value is not None and str(operation_value).strip() != '' and str(operation_value).strip() != 'nan':
-                                step = str(operation_value).strip()
-                        
-                        # 获取checkPic
-                        if 'checkPic' in row:
-                            check_pic_value = row['checkPic']
-                            if check_pic_value is not None and str(check_pic_value).strip() != '' and str(check_pic_value).strip() != 'nan':
-                                verify_image = str(check_pic_value).strip()
-                        
-                        # 获取testResult
-                        if 'testResult' in row:
-                            test_result_value = row['testResult']
-                            if test_result_value is not None and str(test_result_value).strip() != '' and str(test_result_value).strip() != 'nan':
-                                test_result = str(test_result_value).strip()
-                        
-                        all_valid_rows.append({"row": index+2, "title": title, "step": step, "verify_image": verify_image, "test_result": test_result, "oriStep": ori_step, "preScript": pre_script, "commands": combined_commands})
-                    else:
-                        skipped_rows.append({"row": index+2, "reason": "oriStep和preScript列中没有有效命令"})
-                
-                # 保持原始顺序
-                valid_rows = all_valid_rows
-                print(f"处理完成：总有效行 {len(valid_rows)} 个")
-            else:
-                # 原始格式
-                required_columns = ['keyname', 'repeat', 'delay']
-                for col in required_columns:
-                    if col not in df.columns:
-                        raise ValueError(f"Excel文件缺少必要的列: {col}")
-                
-                for index, row in df.iterrows():
-                    try:
-                        # 检查keyname列
-                        keyname = str(row.get('keyname', '')).upper()
-                        if not keyname:
-                            skipped_rows.append({"row": index+2, "reason": "keyname列为空"})
-                            continue
-                        
-                        # 检查repeat列
-                        repeat = int(row.get('repeat', 0))
-                        if repeat <= 0:
-                            skipped_rows.append({"row": index+2, "reason": "repeat值必须大于0"})
-                            continue
-                        
-                        # 检查delay列
-                        delay = float(row.get('delay', 0))
-                        if delay < 0:
-                            skipped_rows.append({"row": index+2, "reason": "delay值不能小于0"})
-                            continue
-                        
-                        # 验证按键名称
-                        if keyname not in KEYCODE_MAP:
-                            skipped_rows.append({"row": index+2, "reason": f"keyname '{keyname}' 不存在于按键映射表中"})
-                            continue
-                        
-                        cmd_str = f"{keyname}/{repeat}/{delay}"
-                        valid_rows.append({"row": index+2, "command": cmd_str})
-                    except (ValueError, TypeError) as e:
-                        skipped_rows.append({"row": index+2, "reason": f"数据类型错误: {str(e)}"})
-            
-            # 如果指定了目标行
-            if target_row is not None:
-                if 1 <= target_row <= len(valid_rows):
-                    valid_row = valid_rows[target_row-1]
-                    if "commands" in valid_row:
-                        commands = valid_row["commands"]
-                    else:
-                        commands = [valid_row["command"]]
-                    return {
-                        "commands": commands,
-                        "valid_rows": valid_rows,
-                        "skipped_rows": skipped_rows,
-                        "executed_row": target_row
-                    }
-                else:
-                    raise ValueError(f"行号 {target_row} 超出范围 (1-{len(valid_rows)})")
-            else:
-                return {
-                    "valid_rows": valid_rows,
-                    "skipped_rows": skipped_rows
-                }
-        except Exception as e:
-            print(f"读取Excel文件失败: {e}")
-            raise HTTPException(status_code=400, detail=f"读取Excel文件失败: {str(e)}")
-
-# 创建ADB控制器实例
-controller = ADBController()
-
-# API路由
-
-@app.get("/api/devices")
-async def get_devices():
-    """获取设备列表"""
-    devices = controller.list_devices()
-    return {"devices": devices}
-
-@app.post("/api/devices/select")
-async def select_device(request: DeviceSelectRequest):
-    """选择设备"""
-    device_index = request.device_index
-    devices = controller.list_devices()
-    if device_index < 1 or device_index > len(devices):
-        raise HTTPException(status_code=400, detail=f"无效的设备序号，请输入 1-{len(devices)} 之间的数字")
-    
-    device_serial = devices[device_index - 1]
-    controller.select_device(device_serial)
-    global current_device
-    current_device = device_serial
-    return {"message": f"已选择设备: {device_serial}"}
-
-@app.get("/api/devices/current")
-async def get_current_device():
-    """获取当前选中的设备"""
-    return {"device": current_device}
-
-@app.post("/api/keymonitor/start")
-async def api_keymonitor_start():
-    if not current_device:
-        raise HTTPException(status_code=400, detail="请先选择设备")
-    if not monitor_active:
-        start_key_monitor_th()
-        return {"active": True}
-    return {"active": True}
-
-@app.post("/api/keymonitor/stop")
-async def api_keymonitor_stop():
-    # 在停止前对最后一条做收尾回填：用“最后一次按下(DOWN) -> 停止时刻”的间隔
-    try:
-        stop_time = time.time()
-        global monitor_live_sequence, monitor_dataset_latest, last_key_time
-        if monitor_live_sequence:
-            lines = monitor_live_sequence.strip().split('\n')
-            if lines:
-                last_line = lines[-1]
-                parts = last_line.split('/')
-                if len(parts) >= 3:
-                    key = parts[0]
-                    count = parts[1]
-                    delay_token = parts[2]
-                    if delay_token == '*' or delay_token == '0':
-                        delay = max(0, math.ceil(stop_time - last_key_time))
-                        lines[-1] = f"{key}/{count}/{delay}"
-                        monitor_live_sequence = '\n'.join(lines) + '\n'
-                        monitor_dataset_latest = monitor_live_sequence
-    except Exception:
-        pass
-    if monitor_active:
-        start_key_monitor_th()
-    seq = monitor_dataset_latest if monitor_dataset_latest else monitor_live_sequence
-    return {"active": False, "sequence": (seq.replace('\n', ',').strip() if seq else "")}
-
-@app.get("/api/keymonitor/status")
-async def api_keymonitor_status():
-    return {
-        "active": monitor_active,
-        "stopping": monitor_stopping,
-        "live_sequence": monitor_live_sequence.replace('\n', ',').strip(),
-        "latest_sequence": monitor_dataset_latest.replace('\n', ',').strip(),
-        "last_error": monitor_last_error
-    }
-
-@app.get("/api/excel/validate")
-async def validate_excel(file_name: str):
-    """验证 Excel 文件的格式和内容"""
-    if not file_name:
-        raise HTTPException(status_code=400, detail="未提供文件名")
-    file_path = os.path.join(os.getcwd(), file_name)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    result = validate_excel_file(file_path)
-    return result
-
-@app.post("/api/excel/append_sequence")
-async def append_sequence(req: AppendSequenceRequest):
-    """将捕获的序列写入到Excel:
-       - 若目标文件包含 preScript 列，则在末尾新增一行，runOption=Y, preScript=sequence
-       - 否则写入/追加到 captured.xlsx，按原始格式 keyname/repeat/delay 每条一行
-    """
-    if not req.sequence or not req.sequence.strip():
-        raise HTTPException(status_code=400, detail="空序列")
-    target = req.file_name.strip()
-    if not target:
-        raise HTTPException(status_code=400, detail="未指定文件名")
-    cwd = os.getcwd()
-    target_path = os.path.join(cwd, target)
-    try:
-        if os.path.exists(target_path):
-            df = pd.read_excel(target_path)
-            # SmartTV 模板：存在 preScript 列
-            if 'preScript' in df.columns:
-                new_row = {col: None for col in df.columns}
-                if 'runOption' in df.columns:
-                    new_row['runOption'] = 'Y'
-                new_row['preScript'] = req.sequence
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                try:
-                    df.to_excel(target_path, index=False)
-                    return {"status": "ok", "file": target, "mode": "smarttv", "rows_added": 1}
-                except Exception as e:
-                    # 回退到 raw
-                    print(f"写入目标文件失败，转raw: {e}")
-    except Exception as e:
-        # 如果读目标失败，退回到 raw 模式
-        print(f"读取目标文件失败，转raw: {e}")
-    # raw 模式：写到 captured.xlsx
-    raw_file = os.path.join(cwd, "captured.xlsx")
-    rows = []
-    for item in [x.strip() for x in req.sequence.split(',') if x.strip()]:
-        parts = item.split('/')
-        if len(parts) >= 3:
-            key = parts[0].upper()
-            try:
-                repeat = int(parts[1])
-            except:
-                repeat = 1
-            try:
-                delay = float(parts[2]) if parts[2] != '*' else 0.0
-            except:
-                delay = 0.0
-            rows.append({"keyname": key, "repeat": repeat, "delay": delay})
-    cap_df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=['keyname', 'repeat', 'delay'])
-    if os.path.exists(raw_file):
-        try:
-            exist = pd.read_excel(raw_file)
-            # 对齐列
-            for col in ['keyname', 'repeat', 'delay']:
-                if col not in exist.columns:
-                    exist[col] = None
-            merged = pd.concat([exist[['keyname','repeat','delay']], cap_df], ignore_index=True)
-            merged.to_excel(raw_file, index=False)
-        except Exception:
-            cap_df.to_excel(raw_file, index=False)
-    else:
-        cap_df.to_excel(raw_file, index=False)
-    return {"status": "ok", "file": "captured.xlsx", "mode": "raw", "rows_added": len(rows)}
-
-@app.get("/api/excel/preview")
-async def preview_excel(file_name: str, max_rows: int = 50):
-    """返回Excel的表头与前N行完整数据，用于页面上显示所有列"""
-    if not file_name:
-        raise HTTPException(status_code=400, detail="未提供文件名")
-    path = os.path.join(os.getcwd(), file_name)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    try:
-        df = pd.read_excel(path)
-        cols = list(df.columns)
-        rows = df.head(max(1, min(max_rows, 200))).fillna('').astype(str).to_dict(orient='records')
-        return {"columns": cols, "rows": rows, "row_count": len(df)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取Excel失败: {e}")
-
-@app.post("/api/excel/write_cell")
-async def write_cell(req: WriteCellRequest):
-    if not req.file_name or not req.column_name:
-        raise HTTPException(status_code=400, detail="缺少参数")
-    path = os.path.join(os.getcwd(), req.file_name)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    try:
-        df = pd.read_excel(path)
-        col = req.column_name
-        if col not in df.columns:
-            df[col] = None
-        ri = int(req.row_index)
-        if ri < 0:
-            ri = 0
-        if ri >= len(df):
-            df = df.reindex(range(ri + 1))
-        df.loc[ri, col] = req.value
-        df.to_excel(path, index=False)
-        return {"status": "ok", "file": req.file_name, "row_index": ri, "column_name": col}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"写入失败: {e}")
-
-@app.post("/api/commands/execute")
-async def execute_commands(request: CommandExecuteRequest):
-    """执行命令序列"""
-    if not current_device:
-        raise HTTPException(status_code=400, detail="请先选择设备")
-    
-    results = controller.execute_commands(request.commands)
-    return {"results": results}
-
-@app.get("/api/excel/files")
-async def get_excel_files():
-    """获取当前工作目录下的Excel文件"""
-    excel_files = []
-    current_dir = os.getcwd()
-    if os.path.exists(current_dir) and os.path.isdir(current_dir):
-        for file in os.listdir(current_dir):
-            if file.endswith('.xlsx') or file.endswith('.xls'):
-                excel_files.append(file)
-    
-    return {"files": excel_files}
-
-from fastapi import UploadFile, File
-
-@app.get("/api/excel/analyze")
-async def analyze_excel_file(file_name: str):
-    """分析Excel文件内容"""
-    # 构建当前目录下的文件路径
-    file_path = os.path.join(os.getcwd(), file_name)
-    print(f"开始分析文件: {file_path}")
-    if not os.path.exists(file_path):
-        print(f"文件不存在: {file_path}")
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    try:
-        print(f"调用read_excel_commands")
-        result = controller.read_excel_commands(file_path)
-        print(f"分析完成，有效行数: {len(result.get('valid_rows', []))}")
-        return result
-    except Exception as e:
-        print(f"分析文件失败: {e}")
-        raise HTTPException(status_code=500, detail=f"分析文件失败: {str(e)}")
-
-@app.post("/api/excel/upload")
-async def upload_excel_file(file: UploadFile = File(...)):
-    """上传Excel文件"""
-    # 检查文件扩展名
-    if not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        raise HTTPException(status_code=400, detail="只支持 .xlsx 和 .xls 格式的文件")
-    
-    # 保存文件到当前目录
-    file_path = os.path.join(os.getcwd(), file.filename)
-    
-    try:
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
-        return {"filename": file.filename, "message": "文件上传成功"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"上传文件失败: {str(e)}")
-
-@app.post("/api/execute")
-async def execute_command(request: SingleCommandExecuteRequest):
-    """执行单个命令"""
-    if not current_device:
-        raise HTTPException(status_code=400, detail="请先选择设备")
-    
-    command = request.command
-    if not command:
-        raise HTTPException(status_code=400, detail="请提供命令")
-    
-    # 执行命令
-    execution_results = controller.execute_commands(command)
-    
-    return {
-        "execution_results": execution_results,
-        "executed_command": command
-    }
-
-from fastapi.responses import StreamingResponse
-from fastapi import Request
-import asyncio
-
-@app.post("/api/excel/execute")
-async def execute_excel_commands(request: Request):
-    """执行Excel文件中的命令"""
-    if not current_device:
-        raise HTTPException(status_code=400, detail="请先选择设备")
-    
-    # 直接读取请求体
-    body = await request.json()
-    file_name = body.get('file_name')
-    row_index = body.get('row_index')
-    
-    if not file_name or not row_index:
-        raise HTTPException(status_code=400, detail="请提供文件名和行号")
-    
-    # 转换row_index为整数
-    try:
-        row_index = int(row_index)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="行号必须是整数")
-    
-    # 构建当前目录下的文件路径
-    file_path = os.path.join(os.getcwd(), file_name)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    result = controller.read_excel_commands(file_path, row_index)
-    commands = result["commands"]
-    
-    # 获取用例标题
-    test_title = None
-    if "valid_rows" in result:
-        valid_rows = result["valid_rows"]
-        if 1 <= row_index <= len(valid_rows):
-            executed_row = valid_rows[row_index - 1]
-            if "title" in executed_row and executed_row["title"]:
-                test_title = executed_row["title"]
-    
-    async def event_generator():
-        # 执行命令
-        for cmd in commands:
-            # 跳过nan命令
-            if cmd.strip().lower() == 'nan':
-                continue
-            # 解析命令
-            parts = cmd.strip().split('/')
-            if len(parts) != 3:
-                import json
-                yield f"data: {json.dumps({'status': 'error', 'message': f'命令格式错误: {cmd}'})}\n\n"
-                continue
-            
-            keyname, repeat, delay = parts
-            keyname = keyname.upper()
-            
-            if keyname not in KEYCODE_MAP:
-                import json
-                yield f"data: {json.dumps({'status': 'error', 'message': f'未知按键: {keyname}'})}\n\n"
-                continue
-            
-            try:
-                repeat = int(repeat)
-                delay = float(delay)
-            except ValueError:
-                import json
-                yield f"data: {json.dumps({'status': 'error', 'message': f'命令参数错误: {cmd}'})}\n\n"
-                continue
-            
-            keycode = KEYCODE_MAP[keyname]
-            
-            # 逐个执行按键
-            for _ in range(repeat):
-                import json
-                # 发送"正在发送"的日志
-                yield f"data: {json.dumps({'status': 'info', 'message': f'正在发送: {keyname}'})}\n\n"
-                await asyncio.sleep(0.01)  # 短暂延迟确保日志发送
-                
-                # 执行命令
-                controller.send_keyevent(keycode, keyname, delay)
-                
-                # 等待一段时间，模拟实时效果
-                await asyncio.sleep(0.1)
-        
-        # 所有命令执行完成后截图
-        import json
-        yield f"data: {json.dumps({'status': 'info', 'message': '正在截图...'})}\n\n"
-        await asyncio.sleep(0.4)
-        
-        screenshot_path = controller.take_screenshot(test_title)
-        if screenshot_path:
-            # 生成截图的访问路径
-            screenshot_url = f"/api/screenshot/{os.path.basename(screenshot_path)}"
-            yield f"data: {json.dumps({'status': 'success', 'message': '截图成功', 'screenshot_url': screenshot_url})}\n\n"
-            
-            # 执行图片验证
-            if 1 <= row_index <= len(valid_rows):
-                executed_row = valid_rows[row_index - 1]
-                verify_image = executed_row.get('verify_image', '')
-                
-                if verify_image:
-                    yield f"data: {json.dumps({'status': 'info', 'message': '正在验证图片...'})}\n\n"
-                    await asyncio.sleep(0.2)
-                    
-                    # 构建校验图片路径
-                    # 先尝试在与Excel文件同名的文件夹中查找
-                    excel_folder = os.path.splitext(file_name)[0]
-                    icon_path = os.path.join(os.getcwd(), excel_folder, verify_image)
-                    
-                    # 如果找不到，尝试在当前目录查找
-                    if not os.path.exists(icon_path):
-                        icon_path = os.path.join(os.getcwd(), verify_image)
-                    
-                    if os.path.exists(icon_path):
-                        # 调用验证函数
-                        verify_result = verify_image_match(screenshot_path, icon_path)
-                        
-                        if verify_result['success']:
-                            if verify_result['matched']:
-                                yield f"data: {json.dumps({'status': 'success', 'message': '验证成功: 图标匹配', 'verify_result': 'PASS', 'score': verify_result['score']})}\n\n"
-                            else:
-                                yield f"data: {json.dumps({'status': 'error', 'message': '验证失败: 图标不匹配', 'verify_result': 'FAIL', 'score': verify_result['score']})}\n\n"
-                        else:
-                            yield f"data: {json.dumps({'status': 'error', 'message': f'验证过程出错: {verify_result['message']}'})}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'status': 'error', 'message': f'校验图片未找到: {verify_image}'})}\n\n"
-        else:
-            yield f"data: {json.dumps({'status': 'error', 'message': '截图失败'})}\n\n"
-    
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-@app.delete("/api/excel/delete")
-async def delete_excel_file(file_name: str):
-    """删除Excel文件"""
-    if not file_name:
-        raise HTTPException(status_code=400, detail="请提供文件名")
-    
-    # 构建当前目录下的文件路径
-    file_path = os.path.join(os.getcwd(), file_name)
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    try:
-        os.remove(file_path)
-        return {"message": f"文件 {file_name} 已成功删除"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
-
-@app.get("/api/screenshot")
-async def get_screenshots():
-    """获取所有截图的列表"""
-    import glob
-    screenshots = glob.glob("screenshot_*.png")
-    screenshots.sort(key=os.path.getmtime, reverse=True)
-    
-    screenshot_list = []
-    for screenshot in screenshots:
-        screenshot_name = os.path.basename(screenshot)
-        screenshot_list.append({
-            "name": screenshot_name,
-            "url": f"/api/screenshot/{screenshot_name}",
-            "timestamp": os.path.getmtime(screenshot)
-        })
-    
-    return {"screenshots": screenshot_list}
-
-@app.get("/api/screenshot/{screenshot_name}")
-async def get_screenshot(screenshot_name: str):
-    """获取特定的截图"""
-    screenshot_path = os.path.join(os.getcwd(), screenshot_name)
-    
-    if not os.path.exists(screenshot_path):
-        raise HTTPException(status_code=404, detail="截图不存在")
-    
-    return FileResponse(screenshot_path, media_type="image/png")
-
-@app.delete("/api/screenshot/clear")
+@app.post("/api/screenshot/clear")
 async def clear_screenshots():
     """清除所有截图"""
     try:
-        import glob
-        # 匹配所有.png文件
-        screenshots = glob.glob("*.png")
-        deleted_count = 0
-        for screenshot in screenshots:
-            try:
-                os.remove(screenshot)
-                deleted_count += 1
-            except Exception as e:
-                print(f"删除截图 {screenshot} 失败: {e}")
-        return {"status": "ok", "deleted_count": deleted_count}
+        count = 0
+        for file in os.listdir('.'):
+            if file.endswith('.png') and (file.startswith('screenshot_') or file.startswith('UC_') or
+                                           file.startswith('HOME') or file.startswith('UserCenter')):
+                try:
+                    os.remove(file)
+                    count += 1
+                except Exception:
+                    pass
+        return {"status": "ok", "deleted_count": count}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清除截图失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
-@app.get("/api/excel/verify_image")
-async def get_verify_image(file_name: str, image_name: str):
-    """获取校验图片"""
-    try:
-        # 获取Excel文件名（不含扩展名）作为文件夹名
-        folder_name = os.path.splitext(file_name)[0]
-        image_folder = os.path.join(os.getcwd(), folder_name)
-        
-        # 构建图片路径
-        image_path = os.path.join(image_folder, image_name)
-        
-        # 检查图片是否存在
-        if not os.path.exists(image_path):
-            # 尝试查找其他常见图片格式
-            for ext in [".png", ".jpg", ".jpeg", ".gif"]:
-                alt_path = os.path.join(image_folder, os.path.splitext(image_name)[0] + ext)
-                if os.path.exists(alt_path):
-                    image_path = alt_path
-                    break
-            else:
-                # 所有格式都没找到
-                return {
-                    "success": False,
-                    "message": f"图片 {image_name} 不存在于 {folder_name} 文件夹中"
-                }
-        
-        # 生成图片URL
-        image_url = f"http://localhost:8003/images/{folder_name}/{os.path.basename(image_path)}"
-        
-        return {
-            "success": True,
-            "image_url": image_url,
-            "message": "图片找到"
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": str(e)
-        }
+@app.get("/api/screenshot/{filename}")
+async def get_screenshot(filename: str):
+    """获取截图"""
+    file_path = os.path.join(os.getcwd(), filename)
+    if not os.path.exists(file_path):
+        return {"error": "截图不存在"}
+    return FileResponse(file_path)
 
-# 静态文件服务（用于提供图片访问）
-from fastapi.staticfiles import StaticFiles
+@app.get("/api/monitor/status")
+async def get_monitor_status():
+    """获取监视器状态"""
+    return {
+        "active": monitor_active,
+        "sequence": monitor_live_sequence,
+        "last_error": monitor_last_error
+    }
 
-# 为每个Excel文件同名文件夹提供静态文件服务
-@app.get("/images/{folder_name}/{image_name}")
-async def serve_image(folder_name: str, image_name: str):
-    """提供图片文件访问"""
-    image_path = os.path.join(os.getcwd(), folder_name, image_name)
-    if not os.path.exists(image_path):
-        raise HTTPException(status_code=404, detail="图片不存在")
-    return FileResponse(image_path)
+@app.post("/api/monitor/start")
+async def start_monitor():
+    """启动按键监视"""
+    start_key_monitor_th()
+    return {"status": "started"}
 
-# 前端静态资源服务（用于打包单EXE运行）
-try:
-    candidates = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidates.extend([
-            os.path.join(meipass, "frontend", "dist"),
-            os.path.join(meipass, "dist"),
-        ])
-    project_root = os.path.dirname(os.path.dirname(__file__))
-    candidates.extend([
-        os.path.join(project_root, "frontend", "dist"),
-        os.path.join(os.getcwd(), "frontend", "dist"),
-        os.path.join(os.getcwd(), "dist"),
-    ])
-    FRONTEND_DIST = next((p for p in candidates if os.path.isdir(p)), None)
-    if FRONTEND_DIST:
-        app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="static")
-except Exception:
-    pass
+@app.post("/api/monitor/stop")
+async def stop_monitor():
+    """停止按键监视"""
+    global monitor_active
+    monitor_active = False
+    return {"status": "stopped", "sequence": monitor_dataset_latest}
 
-# 启动应用
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+if os.path.exists("screenshots"):
+    app.mount("/screenshots", StaticFiles(directory="screenshots"), name="screenshots")

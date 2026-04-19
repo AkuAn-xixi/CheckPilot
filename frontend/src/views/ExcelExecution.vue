@@ -387,7 +387,7 @@
       </div>
       <div class="flex justify-center items-center h-[calc(90vh-60px)]">
         <img 
-          :src="verifyImageUrl + '?t=' + Date.now()" 
+          :src="verifyImageUrl + (verifyImageUrl.includes('?') ? '&' : '?') + 't=' + Date.now()" 
           class="max-h-full max-w-full object-contain" 
           alt="校验图片"
         >
@@ -740,19 +740,12 @@ const showExecutionResult = (rowIndex) => {
 }
 
 // 预览校验图片
-const previewVerifyImage = async (imageName, excelFileName) => {
+const previewVerifyImage = (imageName, excelFileName) => {
   try {
-    const response = await fetch(`http://localhost:8003/api/excel/verify_image?file_name=${encodeURIComponent(excelFileName)}&image_name=${encodeURIComponent(imageName)}`)
-    if (!response.ok) {
-      throw new Error('获取图片失败')
-    }
-    const data = await response.json()
-    if (data.success && data.image_url) {
-      verifyImageUrl.value = data.image_url
-      showVerifyImageModal.value = true
-    } else {
-      alert('未找到图片：' + (data.message || '图片不存在'))
-    }
+    // 使用相对路径，通过Vite代理访问后端API
+    const imageUrl = `/api/excel/verify_image?file_name=${encodeURIComponent(excelFileName)}&image_name=${encodeURIComponent(imageName)}`
+    verifyImageUrl.value = imageUrl
+    showVerifyImageModal.value = true
   } catch (error) {
     console.error('预览图片失败:', error)
     alert('预览图片失败: ' + error.message)

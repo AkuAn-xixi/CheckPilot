@@ -67,7 +67,7 @@ onMounted(async () => {
 // 加载设备列表
 const loadDevices = async () => {
   try {
-    const response = await fetch('/api/devices')
+    const response = await fetch('/api/devices/list')
     const data = await response.json()
     devices.value = data.devices
   } catch (error) {

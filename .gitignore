@@ -1,0 +1,21 @@
+# 打包输出文件
+dist/
+build/
+*.exe
+*.pkg
+*.pyz
+*.spec
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# Excel 数据文件
+*.xlsx
+*.xls
+
+# 其他
+.idea/
+.vscode/
+*.log

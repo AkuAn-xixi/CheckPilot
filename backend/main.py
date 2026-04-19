@@ -11,6 +11,110 @@ import threading
 import math
 import re
 import sys
+import openpyxl
+from collections import Counter
+
+# 导入图片验证功能
+from Chick import verify_image_match
+
+# 定义所有合法的按键名称
+VALID_KEYS = {
+    "OK", "RIGHT", "UP", "LEFT", "DOWN", "SETTING", "HOME", "POWER", "BACK",
+    "SOURCE", "MENU", "CHUP", "CHDOWN", "DIGITAL", "EXITMENU", "DIGITAL1",
+    "DIGITAL2", "DIGITAL3", "DIGITAL4", "DIGITAL5", "DIGITAL6", "DIGITAL7",
+    "DIGITAL8", "DIGITAL9", "DIGITAL0", "LIBRARY", "TV_AV", "VOLUMEUP",
+    "VOLUMEDOWN", "NETFLIX", "YOUTUBE", "PRIME_VIDEO", "ACTION3", "APPS", "FILES", "MUTE"
+}
+
+def validate_excel_file(file_path):
+    """验证 Excel 文件的格式和内容"""
+    try:
+        wb = openpyxl.load_workbook(file_path)
+        sheet = wb.active
+    except Exception as e:
+        return {"success": False, "errors": [f"无法打开Excel文件: {e}"]}
+    
+    errors = []
+    warnings = []
+    
+    # 验证C列值是否唯一
+    c_values = []
+    for i in range(2, sheet.max_row + 1):
+        cell_value = sheet.cell(row=i, column=3).value
+        if cell_value is not None:
+            c_values.append(str(cell_value))
+    
+    if len(c_values) != len(set(c_values)):
+        duplicates = [item for item, count in Counter(c_values).items() if count > 1]
+        errors.append(f"C列值不唯一，重复的值有: {', '.join(duplicates)}")
+    
+    # 验证F和G列格式（按键名/次数/时间，多个用逗号分隔）
+    for col in ["F", "G"]:
+        col_idx = openpyxl.utils.column_index_from_string(col)
+        for row in range(2, sheet.max_row + 1):
+            cell_value = str(sheet.cell(row=row, column=col_idx).value)
+            if cell_value == "None" or not cell_value.strip():
+                continue
+            
+            # 检查结尾是否有多余的逗号
+            if cell_value.strip().endswith(","):
+                errors.append(f"{col}{row} 结尾有多余的逗号: '{cell_value.strip()}'")
+            
+            # 检查每个命令段
+            commands = [cmd.strip() for cmd in cell_value.split(",") if cmd.strip()]
+            for cmd in commands:
+                parts = cmd.split("/")
+                if len(parts) != 3:
+                    errors.append(f"{col}{row} 命令 '{cmd}' 格式应为 KEY/COUNT/TIME")
+                    continue
+                
+                key, count, time_val = parts
+                if key not in VALID_KEYS:
+                    errors.append(f"{col}{row} 按键名称 '{key}' 无效")
+                
+                if not count.isdigit() or int(count) <= 0:
+                    errors.append(f"{col}{row} 按键次数 '{count}' 必须为正整数")
+                
+                try:
+                    float(time_val)
+                except ValueError:
+                    errors.append(f"{col}{row} 时间参数 '{time_val}' 必须为数字")
+    
+    # 验证I列格式（*.png）
+    for row in range(2, sheet.max_row + 1):
+        cell_value = str(sheet.cell(row=row, column=9).value)
+        if cell_value == "None" or not cell_value.strip():
+            continue
+        
+        if not cell_value.lower().endswith(".png"):
+            errors.append(f"I{row} 必须为PNG文件格式，当前值: {cell_value}")
+    
+    # 验证J列格式（(数字,数字)）使用英文括号和逗号
+    for row in range(2, sheet.max_row + 1):
+        cell_value = str(sheet.cell(row=row, column=10).value)
+        if cell_value == "None" or not cell_value.strip():
+            continue
+        
+        # 检查英文括号和逗号
+        if not (cell_value.startswith("(") and cell_value.endswith(")") and "," in cell_value):
+            errors.append(f"J{row} 必须使用英文括号和逗号，格式应为(数字,数字)，当前值: {cell_value}")
+            continue
+        
+        # 提取数字部分
+        try:
+            num_part = cell_value[1:-1]  # 去掉括号
+            num1, num2 = [num.strip() for num in num_part.split(",", 1)]
+            float(num1)
+            float(num2)
+        except ValueError:
+            errors.append(f"J{row} 包含非数字内容，当前值: {cell_value}")
+    
+    return {
+        "success": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "total_rows": sheet.max_row - 1 if sheet.max_row > 1 else 0
+    }
 
 # 定义请求模型
 class DeviceSelectRequest(BaseModel):
@@ -604,9 +708,18 @@ async def api_keymonitor_status():
         "last_error": monitor_last_error
     }
 
-@app.post("/api/commands/execute")
-async def execute_commands(request: CommandExecuteRequest):
-    """执行命令序列"""
+@app.get("/api/excel/validate")
+async def validate_excel(file_name: str):
+    """验证 Excel 文件的格式和内容"""
+    if not file_name:
+        raise HTTPException(status_code=400, detail="未提供文件名")
+    file_path = os.path.join(os.getcwd(), file_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    result = validate_excel_file(file_path)
+    return result
+
 @app.post("/api/excel/append_sequence")
 async def append_sequence(req: AppendSequenceRequest):
     """将捕获的序列写入到Excel:
@@ -884,6 +997,38 @@ async def execute_excel_commands(request: Request):
             # 生成截图的访问路径
             screenshot_url = f"/api/screenshot/{os.path.basename(screenshot_path)}"
             yield f"data: {json.dumps({'status': 'success', 'message': '截图成功', 'screenshot_url': screenshot_url})}\n\n"
+            
+            # 执行图片验证
+            if 1 <= row_index <= len(valid_rows):
+                executed_row = valid_rows[row_index - 1]
+                verify_image = executed_row.get('verify_image', '')
+                
+                if verify_image:
+                    yield f"data: {json.dumps({'status': 'info', 'message': '正在验证图片...'})}\n\n"
+                    await asyncio.sleep(0.2)
+                    
+                    # 构建校验图片路径
+                    # 先尝试在与Excel文件同名的文件夹中查找
+                    excel_folder = os.path.splitext(file_name)[0]
+                    icon_path = os.path.join(os.getcwd(), excel_folder, verify_image)
+                    
+                    # 如果找不到，尝试在当前目录查找
+                    if not os.path.exists(icon_path):
+                        icon_path = os.path.join(os.getcwd(), verify_image)
+                    
+                    if os.path.exists(icon_path):
+                        # 调用验证函数
+                        verify_result = verify_image_match(screenshot_path, icon_path)
+                        
+                        if verify_result['success']:
+                            if verify_result['matched']:
+                                yield f"data: {json.dumps({'status': 'success', 'message': '验证成功: 图标匹配', 'verify_result': 'PASS', 'score': verify_result['score']})}\n\n"
+                            else:
+                                yield f"data: {json.dumps({'status': 'error', 'message': '验证失败: 图标不匹配', 'verify_result': 'FAIL', 'score': verify_result['score']})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'status': 'error', 'message': f'验证过程出错: {verify_result['message']}'})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'status': 'error', 'message': f'校验图片未找到: {verify_image}'})}\n\n"
         else:
             yield f"data: {json.dumps({'status': 'error', 'message': '截图失败'})}\n\n"
     
@@ -952,6 +1097,58 @@ async def clear_screenshots():
         return {"status": "ok", "deleted_count": deleted_count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清除截图失败: {str(e)}")
+
+@app.get("/api/excel/verify_image")
+async def get_verify_image(file_name: str, image_name: str):
+    """获取校验图片"""
+    try:
+        # 获取Excel文件名（不含扩展名）作为文件夹名
+        folder_name = os.path.splitext(file_name)[0]
+        image_folder = os.path.join(os.getcwd(), folder_name)
+        
+        # 构建图片路径
+        image_path = os.path.join(image_folder, image_name)
+        
+        # 检查图片是否存在
+        if not os.path.exists(image_path):
+            # 尝试查找其他常见图片格式
+            for ext in [".png", ".jpg", ".jpeg", ".gif"]:
+                alt_path = os.path.join(image_folder, os.path.splitext(image_name)[0] + ext)
+                if os.path.exists(alt_path):
+                    image_path = alt_path
+                    break
+            else:
+                # 所有格式都没找到
+                return {
+                    "success": False,
+                    "message": f"图片 {image_name} 不存在于 {folder_name} 文件夹中"
+                }
+        
+        # 生成图片URL
+        image_url = f"http://localhost:8003/images/{folder_name}/{os.path.basename(image_path)}"
+        
+        return {
+            "success": True,
+            "image_url": image_url,
+            "message": "图片找到"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": str(e)
+        }
+
+# 静态文件服务（用于提供图片访问）
+from fastapi.staticfiles import StaticFiles
+
+# 为每个Excel文件同名文件夹提供静态文件服务
+@app.get("/images/{folder_name}/{image_name}")
+async def serve_image(folder_name: str, image_name: str):
+    """提供图片文件访问"""
+    image_path = os.path.join(os.getcwd(), folder_name, image_name)
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(image_path)
 
 # 前端静态资源服务（用于打包单EXE运行）
 try:

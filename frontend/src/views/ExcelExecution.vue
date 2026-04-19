@@ -90,6 +90,45 @@
       
       <!-- 文件分析部分 -->
       <div v-if="selectedFile" class="mb-6">
+        <!-- 验证结果显示 -->
+        <div v-if="validationResult" class="mb-4">
+          <div 
+            class="p-4 rounded-lg"
+            :class="validationResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'"
+          >
+            <h4 class="font-medium mb-2 flex items-center gap-2">
+              <span 
+                class="text-xl"
+                :class="validationResult.success ? 'text-green-600' : 'text-red-600'"
+              >
+                {{ validationResult.success ? '✅' : '❌' }}
+              </span>
+              文件验证结果 - {{ validationResult.success ? '通过' : '发现问题' }}
+              (共 {{ validationResult.total_rows }} 行)
+            </h4>
+            
+            <!-- 错误列表 -->
+            <div v-if="validationResult.errors && validationResult.errors.length > 0" class="mt-2">
+              <p class="text-sm font-medium text-red-700 mb-1">错误列表：</p>
+              <div class="text-sm text-red-600 space-y-1 max-h-40 overflow-y-auto">
+                <div v-for="(error, idx) in validationResult.errors" :key="idx" class="break-all">
+                  • {{ error }}
+                </div>
+              </div>
+            </div>
+            
+            <!-- 警告列表 -->
+            <div v-if="validationResult.warnings && validationResult.warnings.length > 0" class="mt-2">
+              <p class="text-sm font-medium text-yellow-700 mb-1">警告列表：</p>
+              <div class="text-sm text-yellow-600 space-y-1">
+                <div v-for="(warning, idx) in validationResult.warnings" :key="idx" class="break-all">
+                  • {{ warning }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
         <div v-if="loadingAnalysis">
           <p>分析中...</p>
         </div>
@@ -165,7 +204,10 @@
                       >
                     </td>
                     <td class="border px-3 py-2">
-                    <span v-if="item.row.test_result" :class="item.row.test_result.toUpperCase() === 'PASS' ? 'text-success' : 'text-danger'">
+                    <span v-if="item.row.result" :class="item.row.result.toUpperCase() === 'PASS' ? 'text-success' : 'text-danger'">
+                      {{ item.row.result }}
+                      </span>
+                    <span v-else-if="item.row.test_result" :class="item.row.test_result.toUpperCase() === 'PASS' ? 'text-success' : 'text-danger'">
                       {{ item.row.test_result }}
                       </span>
                       <span v-else>-</span>
@@ -197,7 +239,9 @@
                     <span v-if="(!item.row.step || item.row.step === 'nan') && (!item.row.oriStep || item.row.oriStep === 'nan') && (!item.row.preScript || item.row.preScript === 'nan') && (!item.row.command || item.row.command === 'nan')">-</span>
                     </td>
                     <td class="border px-3 py-2 whitespace-normal break-words">
-                    <span v-if="item.row.verify_image && item.row.verify_image !== 'nan'">
+                    <span v-if="item.row.verify_image && item.row.verify_image !== 'nan'" 
+                          class="cursor-pointer text-primary hover:underline"
+                          @click="previewVerifyImage(item.row.verify_image, selectedFile)">
                       {{ item.row.verify_image }}
                       </span>
                       <span v-else>-</span>
@@ -246,6 +290,18 @@
             <div class="flex items-center gap-2">
               <button class="btn btn-secondary" @click="handlePrevPage" :disabled="currentPage === 1">上一页</button>
               <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+              <div class="flex items-center gap-1">
+                <span>跳转到</span>
+                <input 
+                  type="number" 
+                  v-model.number="jumpPage" 
+                  class="form-input w-16 text-center" 
+                  :min="1" 
+                  :max="totalPages"
+                  @keyup.enter="handleJumpPage"
+                >
+                <button class="btn btn-primary btn-sm" @click="handleJumpPage" :disabled="!jumpPage || jumpPage < 1 || jumpPage > totalPages">跳转</button>
+              </div>
               <button class="btn btn-secondary" @click="handleNextPage" :disabled="currentPage === totalPages">下一页</button>
               <span>共 {{ filteredRows.length }} 条</span>
             </div>
@@ -299,16 +355,16 @@
 
   <!-- 截图弹窗 -->
   <div v-if="showScreenshotModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl p-4 max-w-4xl w-full max-h-[90vh]">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="text-xl font-medium">执行截图</h3>
+    <div class="bg-white rounded-lg shadow-xl p-4 w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-lg font-medium">执行截图</h3>
         <button @click="showScreenshotModal = false" class="text-gray-500 hover:text-gray-700">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
-      <div class="flex justify-center items-center h-[80vh]">
+      <div class="flex justify-center items-center h-[calc(90vh-60px)]">
         <img 
           :src="modalScreenshotUrl + '?t=' + Date.now()" 
           class="max-h-full max-w-full object-contain" 
@@ -317,10 +373,31 @@
       </div>
     </div>
   </div>
+  
+  <!-- 校验图片预览弹窗 -->
+  <div v-if="showVerifyImageModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl p-4 w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-lg font-medium">校验图片预览</h3>
+        <button @click="showVerifyImageModal = false" class="text-gray-500 hover:text-gray-700">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="flex justify-center items-center h-[calc(90vh-60px)]">
+        <img 
+          :src="verifyImageUrl + '?t=' + Date.now()" 
+          class="max-h-full max-w-full object-contain" 
+          alt="校验图片"
+        >
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 
 // 状态管理
@@ -328,6 +405,7 @@ const selectedDevice = ref('')
 const excelFiles = ref([])
 const selectedFile = ref('')
 const excelAnalysis = ref(null)
+const validationResult = ref(null)
 const executionResults = ref([])
 const rowIndex = ref(1)
 const loadingFiles = ref(false)
@@ -340,7 +418,10 @@ const searchKeyword = ref('')
 const rowScreenshots = ref({})
 const showScreenshotModal = ref(false)
 const modalScreenshotUrl = ref('')
+const showVerifyImageModal = ref(false)
+const verifyImageUrl = ref('')
 const currentPage = ref(1)
+const jumpPage = ref(1)
 const pageSize = ref(20)
 const isBatchExecuting = ref(false)
 
@@ -460,6 +541,7 @@ const loadExcelFiles = async () => {
 const selectFile = (file) => {
   selectedFile.value = file
   excelAnalysis.value = null
+  validationResult.value = null
   executionResults.value = []
   rowIndex.value = 1
 }
@@ -473,6 +555,21 @@ const analyzeFile = async () => {
   
   loadingAnalysis.value = true
   try {
+    // 首先调用验证功能
+    const validateResponse = await fetch(`/api/excel/validate?file_name=${encodeURIComponent(selectedFile.value)}`)
+    if (!validateResponse.ok) {
+      throw new Error('验证文件失败')
+    }
+    const validateData = await validateResponse.json()
+    validationResult.value = validateData
+    
+    // 如果验证失败，不继续分析，让用户查看错误
+    if (!validateData.success) {
+      alert('文件验证发现问题，请查看下方的验证结果')
+      // 即使验证失败，仍然可以继续分析，让用户自己决定
+    }
+    
+    // 继续调用分析功能
     const response = await fetch(`/api/excel/analyze?file_name=${encodeURIComponent(selectedFile.value)}`)
     if (!response.ok) {
       throw new Error('分析文件失败')
@@ -521,7 +618,7 @@ const executeExcelRowByIndex = (index) => {
     }
     
     // 使用fetch API发送请求并获取可读流
-    fetch('/api/excel/execute', {
+    fetch('http://localhost:8003/api/excel/execute', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -581,6 +678,14 @@ const executeExcelRowByIndex = (index) => {
                   if (result.screenshot_url) {
                     rowScreenshots.value[index] = result.screenshot_url
                   }
+                  // 如果有验证结果，更新执行结果
+                  if (result.verify_result) {
+                    // 找到对应的行并更新结果
+                    const rowData = excelAnalysis.value.valid_rows[index - 1]
+                    if (rowData) {
+                      rowData.result = result.verify_result
+                    }
+                  }
                 } catch (e) {
                   console.error('解析数据失败:', e)
                 }
@@ -631,6 +736,26 @@ const showExecutionResult = (rowIndex) => {
     showScreenshotModal.value = true
   } else {
     console.log('No screenshot found for row:', rowIndex)
+  }
+}
+
+// 预览校验图片
+const previewVerifyImage = async (imageName, excelFileName) => {
+  try {
+    const response = await fetch(`http://localhost:8003/api/excel/verify_image?file_name=${encodeURIComponent(excelFileName)}&image_name=${encodeURIComponent(imageName)}`)
+    if (!response.ok) {
+      throw new Error('获取图片失败')
+    }
+    const data = await response.json()
+    if (data.success && data.image_url) {
+      verifyImageUrl.value = data.image_url
+      showVerifyImageModal.value = true
+    } else {
+      alert('未找到图片：' + (data.message || '图片不存在'))
+    }
+  } catch (error) {
+    console.error('预览图片失败:', error)
+    alert('预览图片失败: ' + error.message)
   }
 }
 
@@ -713,6 +838,20 @@ const handleNextPage = () => {
     selectedRows.value = []
   }
 }
+
+// 处理跳转到指定页码
+const handleJumpPage = () => {
+  const page = parseInt(jumpPage.value)
+  if (page && page >= 1 && page <= totalPages.value) {
+    currentPage.value = page
+    selectedRows.value = []
+  }
+}
+
+// 监听页码变化，更新跳转输入框
+watch(currentPage, (newPage) => {
+  jumpPage.value = newPage
+})
 
 // 上传文件
 const fileInput = ref(null)

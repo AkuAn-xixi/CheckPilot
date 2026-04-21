@@ -4,14 +4,17 @@ import asyncio
 import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from app.runtime import get_controller, get_current_device
 from app.utils.adb_controller import KEYCODE_MAP
-from app.services.image_service import verify_image_match
+from app.utils.path_resolver import resolve_excel_file, resolve_image_file
+from app.services.image_service import verify_image_match, verify_image_base64_match
 
 router = APIRouter(prefix="/api/excel", tags=["execution"])
 
-async def execute_commands_stream(file_name: str, row_index: int, file_path: str, valid_rows: list):
+async def execute_commands_stream(file_name: str, row_index: int, file_path: str, valid_rows: list, verify_image_base64: str = ""):
     """执行命令并生成流式响应"""
-    from main import controller, current_device
+    controller = get_controller()
+    current_device = get_current_device()
 
     commands = valid_rows[row_index - 1]["commands"] if row_index <= len(valid_rows) else []
 
@@ -69,35 +72,38 @@ async def execute_commands_stream(file_name: str, row_index: int, file_path: str
                 yield f"data: {json.dumps({'status': 'info', 'message': '正在验证图片...'})}\n\n"
                 await asyncio.sleep(0.2)
 
-                # 从test_cases/images目录获取校验图片
-                icon_path = os.path.join(os.getcwd(), 'test_cases', 'images', verify_image)
-
-                if os.path.exists(icon_path):
-                    verify_result = verify_image_match(screenshot_path, icon_path)
-
-                    if verify_result['success']:
-                        if verify_result['matched']:
-                            yield f"data: {json.dumps({'status': 'success', 'message': '验证成功: 图标匹配', 'verify_result': 'PASS', 'score': verify_result['score']})}\n\n"
-                        else:
-                            yield f"data: {json.dumps({'status': 'error', 'message': '验证失败: 图标不匹配', 'verify_result': 'FAIL', 'score': verify_result['score']})}\n\n"
-                    else:
-                        message = f'验证过程出错: {verify_result["message"]}'
-                        yield f"data: {json.dumps({'status': 'error', 'message': message})}\n\n"
+                if verify_image_base64:
+                    verify_result = verify_image_base64_match(screenshot_path, verify_image_base64)
                 else:
-                    yield f"data: {json.dumps({'status': 'error', 'message': f'校验图片未找到: {verify_image}'})}\n\n"
+                    icon_path = resolve_image_file(verify_image, excel_file_name=file_name)
+                    if not icon_path.exists():
+                        yield f"data: {json.dumps({'status': 'error', 'message': f'校验图片未找到: {verify_image}'})}\n\n"
+                        return
+
+                    verify_result = verify_image_match(screenshot_path, str(icon_path))
+
+                if verify_result['success']:
+                    if verify_result['matched']:
+                        yield f"data: {json.dumps({'status': 'success', 'message': '验证成功: 图标匹配', 'verify_result': 'PASS', 'score': verify_result['score']})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'status': 'error', 'message': '验证失败: 图标不匹配', 'verify_result': 'FAIL', 'score': verify_result['score']})}\n\n"
+                else:
+                    message = f'验证过程出错: {verify_result["message"]}'
+                    yield f"data: {json.dumps({'status': 'error', 'message': message})}\n\n"
     else:
         yield f"data: {json.dumps({'status': 'error', 'message': '截图失败'})}\n\n"
 
 @router.post("/execute")
 async def execute_excel_commands(request: Request):
     """执行Excel文件中的命令"""
-    from main import current_device
+    current_device = get_current_device()
     if not current_device:
         raise HTTPException(status_code=400, detail="请先选择设备")
 
     body = await request.json()
     file_name = body.get('file_name')
     row_index = body.get('row_index')
+    verify_image_base64 = body.get('verify_image_base64', '')
 
     if not file_name or not row_index:
         raise HTTPException(status_code=400, detail="请提供文件名和行号")
@@ -107,15 +113,15 @@ async def execute_excel_commands(request: Request):
     except ValueError:
         raise HTTPException(status_code=400, detail="行号必须是整数")
 
-    file_path = os.path.join(os.getcwd(), 'test_cases', 'excel', file_name)
-    if not os.path.exists(file_path):
+    file_path = resolve_excel_file(file_name)
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    from main import controller
-    result = controller.read_excel_commands(file_path, row_index)
+    controller = get_controller()
+    result = controller.read_excel_commands(str(file_path), row_index)
     valid_rows = result.get("valid_rows", [])
 
     return StreamingResponse(
-        execute_commands_stream(file_name, row_index, file_path, valid_rows),
+        execute_commands_stream(file_name, row_index, str(file_path), valid_rows, verify_image_base64=verify_image_base64),
         media_type="text/event-stream"
     )

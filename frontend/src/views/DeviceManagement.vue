@@ -21,13 +21,13 @@
                 <p class="font-medium">设备 {{ index + 1 }}</p>
                 <p class="text-gray-600">{{ device }}</p>
               </div>
-              <button 
-                @click="selectDevice(index + 1)" 
-                class="btn btn-primary"
-                :disabled="selectedDevice === device"
-              >
-                {{ selectedDevice === device ? '已选择' : '选择' }}
-              </button>
+                <button 
+                  @click="selectDevice(index)" 
+                  class="btn btn-primary"
+                  :disabled="selectedDevice === device"
+                >
+                  {{ selectedDevice === device ? '已选择' : '选择' }}
+                </button>
             </div>
           </div>
         </div>
@@ -76,10 +76,11 @@ onMounted(async () => {
 const loadDevices = async () => {
   loading.value = true
   try {
-    const response = await fetch('/api/devices')
+    const response = await fetch('/api/devices/list')
     const data = await response.json()
-    devices.value = data.devices
+    devices.value = Array.isArray(data.devices) ? data.devices : []
   } catch (error) {
+    devices.value = []
     console.error('获取设备列表失败:', error)
   } finally {
     loading.value = false
@@ -108,8 +109,12 @@ const selectDevice = async (index) => {
       body: JSON.stringify({ device_index: index })
     })
     const data = await response.json()
-    selectedDevice.value = data.message.split(': ')[1]
-    alert('设备选择成功')
+      if (data.status === 'success') {
+        selectedDevice.value = data.device
+        alert('设备选择成功')
+      } else {
+        alert('选择设备失败：' + (data.detail || '未知错误'))
+      }
   } catch (error) {
     console.error('选择设备失败:', error)
     alert('选择设备失败，请重试')

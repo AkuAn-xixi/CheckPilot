@@ -48,7 +48,7 @@
     <footer class="bg-gray-800 text-white py-3">
       <div class="container mx-auto px-4 text-sm">
         <div class="flex justify-between">
-          <div>ADB Control Tool v1.0.0</div>
+          <div>ADB Control Tool v1.1.0</div>
           <div>{{ statusMessage }}</div>
         </div>
       </div>

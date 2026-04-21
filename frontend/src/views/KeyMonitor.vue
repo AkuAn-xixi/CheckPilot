@@ -24,30 +24,16 @@
           >
             停止监听
           </button>
-          <div class="flex items-center gap-2">
-            <select v-model="selectedExcel" class="form-select min-w-[220px]">
-              <option value="" disabled>选择目标Excel文件</option>
-              <option v-for="f in excelFiles" :key="f" :value="f">{{ f }}</option>
-            </select>
-            <button 
-              @click="writeToExcel"
-              class="btn btn-success"
-              :disabled="!selectedExcel || !keyMonitorSequence || keyMonitorActive || isStarting"
-              title="停止监听后写入到Excel"
-            >
-              写入到Excel
-            </button>
-          </div>
           <button 
             @click="copySequence"
             class="btn btn-primary"
-            :disabled="!keyMonitorSequence || keyMonitorActive || isStarting"
+            :disabled="!workingSequence || keyMonitorActive || isStarting"
             title="监听未进行时才可复制"
           >
             复制序列
           </button>
         </div>
-        <div class="border rounded p-3 bg-gray-50 min-h-[120px] font-mono text-sm whitespace-pre-wrap w-full overflow-auto">
+        <div v-if="keyMonitorActive || isStarting" class="border rounded p-3 bg-gray-50 min-h-[120px] font-mono text-sm whitespace-pre-wrap w-full overflow-auto">
           <template v-if="displayParts.length > 0">
             <template v-for="(part, idx) in displayParts" :key="idx">
               <span>
@@ -64,50 +50,66 @@
             <span class="text-gray-400">监听到的按键序列会显示在这里，格式为 KEY/次数/延迟,KEY/次数/延迟</span>
           </template>
         </div>
+        <textarea
+          v-else
+          v-model="editableSequence"
+          @input="handleEditableSequenceInput"
+          class="form-input min-h-[120px] font-mono text-sm w-full"
+          placeholder="监听结束后，可直接在这里修正错误指令或延迟"
+        ></textarea>
         <div class="text-sm text-gray-500 mt-2" v-if="keyMonitorActive && !keyMonitorSequence">
           正在监听，请在设备上按键…
         </div>
         <div class="text-sm text-danger mt-2" v-if="keyMonitorError">
           {{ keyMonitorError }}
         </div>
-        <div class="mt-6">
-          <div class="flex items-center gap-2 mb-2">
-            <h3 class="font-medium">Excel 文件分析</h3>
-            <button class="btn btn-secondary" @click="analyzeExcel" :disabled="!selectedExcel || keyMonitorActive || isStarting">
-              分析文件
+        <div v-if="!keyMonitorActive && !isStarting" class="mt-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+          <div class="text-sm text-gray-700">
+            本次结果仍可直接在上方文本框手改。如果你已经确认某个错误指令对应哪个正确按键，请先把规则保存在这里；保存后，下次监听会直接输出修正后的指令。
+          </div>
+          <div class="flex flex-wrap gap-2 items-center mt-2">
+            <select v-model="replaceSourceKey" class="form-select min-w-[180px]">
+              <option value="" disabled>选择错误指令</option>
+              <option v-for="cmd in detectedInvalidCommands" :key="cmd" :value="cmd">{{ cmd }}</option>
+            </select>
+            <input
+              v-model="replaceTargetKey"
+              type="text"
+              list="valid-monitor-keys"
+              class="form-input min-w-[180px]"
+              placeholder="替换为正确指令，如 SETTING"
+            >
+            <datalist id="valid-monitor-keys">
+              <option v-for="cmd in validMonitorTargets" :key="cmd" :value="cmd"></option>
+            </datalist>
+            <button class="btn btn-primary btn-sm" @click="saveCorrectionRule" :disabled="!replaceSourceKey || !replaceTargetKey.trim() || savingMapping">
+              {{ savingMapping ? '保存中…' : '保存规则并应用当前结果' }}
+            </button>
+            <button class="btn btn-secondary btn-sm" @click="restoreCapturedSequence" :disabled="!sequenceDirty">
+              恢复原始序列
             </button>
           </div>
-          <div v-if="loadingPreview">加载中…</div>
-          <div v-else-if="previewColumns.length > 0" class="overflow-x-auto w-full">
-            <table class="border w-full table-auto">
-              <thead class="bg-gray-100">
-                <tr>
-                  <th v-for="c in previewColumns" :key="c" class="border px-3 py-2 text-left max-w-[220px] whitespace-normal break-words">
-                    {{ c }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, rIdx) in previewRows" :key="rIdx">
-                  <td 
-                    v-for="c in previewColumns" 
-                    :key="c" 
-                    class="border px-3 py-2 text-left max-w-[220px] whitespace-normal break-words cursor-pointer"
-                    :class="isSelectedCell(rIdx, c) ? 'bg-yellow-100' : ''"
-                    @click="selectCell(rIdx, c)"
-                    title="点击选择为写入目标"
-                  >
-                    {{ row[c] ?? '' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="text-sm text-gray-500 mt-2">
-              总行数：{{ previewTotal }} （展示前 {{ previewRows.length }} 行）
-            </div>
+          <div v-if="detectedInvalidCommands.length > 0" class="text-sm text-yellow-700 mt-2">
+            本次监听检测到疑似错误指令：{{ detectedInvalidCommands.join(', ') }}
           </div>
-          <div v-else class="text-sm text-gray-500">
-            选择文件后点击“分析文件”查看全部列
+          <div v-else class="text-sm text-gray-600 mt-2">
+            本次监听没有发现新的未知指令。你也可以直接维护下面已保存的纠正规则。
+          </div>
+          <div v-if="mappingError" class="text-sm text-danger mt-2">
+            {{ mappingError }}
+          </div>
+          <div v-if="savedMappingsList.length > 0" class="mt-3">
+            <div class="text-sm text-gray-700 mb-2">已保存的自动纠正规则：</div>
+            <div class="flex flex-col gap-2">
+              <div v-for="mapping in savedMappingsList" :key="mapping.source" class="flex flex-wrap items-center gap-2 text-sm bg-white border rounded px-3 py-2">
+                <span class="font-mono">{{ mapping.source }}</span>
+                <span>→</span>
+                <span class="font-mono text-primary">{{ mapping.target }}</span>
+                <button class="btn btn-secondary btn-sm ml-auto" @click="removeCorrectionRule(mapping.source)">
+                  删除规则
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -118,30 +120,99 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 
+const VALID_MONITOR_KEYS = new Set([
+  'OK', 'HOME', 'BACK', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'MENU', 'SETTING',
+  'DIGITAL0', 'DIGITAL1', 'DIGITAL2', 'DIGITAL3', 'DIGITAL4', 'DIGITAL5', 'DIGITAL6', 'DIGITAL7', 'DIGITAL8', 'DIGITAL9',
+  'APPS', 'POWER', 'SOURCE', 'CHUP', 'CHDOWN', 'EXIT', 'LIBRARY', 'TV_AV', 'VOLUMEUP', 'VOLUMEDOWN',
+  'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'PRIME_VII', 'ACTION3', 'ACTIONS', 'FILES', 'RED', 'GREEN', 'YELLOW', 'BLUE',
+  'INFORMATION', 'MUTE'
+])
+const defaultValidMonitorKeys = Array.from(VALID_MONITOR_KEYS)
+  .filter(key => !['PRIME_VII', 'ACTIONS'].includes(key))
+  .sort()
+
 const selectedDevice = ref('')
 const keyMonitorActive = ref(false)
 const keyMonitorSequence = ref('')
+const editableSequence = ref('')
 const keyMonitorError = ref('')
 let statusTimer = null
 const apiUnavailable = ref(false)
 const isStarting = ref(false)
-const excelFiles = ref([])
-const selectedExcel = ref('')
-const loadingPreview = ref(false)
-const previewColumns = ref([])
-const previewRows = ref([])
-const previewTotal = ref(0)
-const selectedRow = ref(null)
-const selectedCol = ref('')
+const replaceSourceKey = ref('')
+const replaceTargetKey = ref('')
+const sequenceDirty = ref(false)
+const savedMappings = ref({})
+const savingMapping = ref(false)
+const mappingError = ref('')
+const validMonitorTargets = ref(defaultValidMonitorKeys)
 const displayParts = computed(() => {
   const s = keyMonitorSequence.value || ''
   return s.split(',').map(i => i.trim()).filter(Boolean)
 })
+const workingSequence = computed(() => {
+  return (keyMonitorActive.value || isStarting.value)
+    ? keyMonitorSequence.value
+    : editableSequence.value
+})
+const detectedInvalidCommands = computed(() => {
+  if (keyMonitorActive.value || isStarting.value) {
+    return []
+  }
+  const parts = (keyMonitorSequence.value || '').split(',').map(item => item.trim()).filter(Boolean)
+  const invalid = new Set()
+  for (const part of parts) {
+    const [key] = part.split('/')
+    const normalizedKey = (key || '').trim().toUpperCase()
+    if (normalizedKey && !VALID_MONITOR_KEYS.has(normalizedKey)) {
+      invalid.add(normalizedKey)
+    }
+  }
+  return Array.from(invalid)
+})
+const savedMappingsList = computed(() => {
+  return Object.entries(savedMappings.value)
+    .map(([source, target]) => ({ source, target }))
+    .sort((left, right) => left.source.localeCompare(right.source))
+})
+const validMonitorTargetSet = computed(() => new Set(validMonitorTargets.value))
 const splitPart = (p) => p.split('/')
+
+const replaceCommandInSequence = (sequence, sourceKey, targetKey) => {
+  const normalizedSource = (sourceKey || '').trim().toUpperCase()
+  const normalizedTarget = (targetKey || '').trim().toUpperCase()
+  if (!normalizedSource || !normalizedTarget || !sequence) {
+    return sequence
+  }
+  return sequence
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const segments = part.split('/')
+      if (segments.length < 3) {
+        return part
+      }
+      if ((segments[0] || '').trim().toUpperCase() !== normalizedSource) {
+        return part
+      }
+      return `${normalizedTarget}/${segments[1]}/${segments[2]}`
+    })
+    .join(', ')
+}
+
+const syncCapturedSequence = (sequence) => {
+  const normalized = sequence || ''
+  keyMonitorSequence.value = normalized
+  editableSequence.value = normalized
+  sequenceDirty.value = false
+  replaceSourceKey.value = ''
+  replaceTargetKey.value = ''
+}
 
 onMounted(async () => {
   await loadCurrentDevice()
-  await loadExcelFiles()
+  await loadCorrectionRules()
   startStatusPolling()
 })
 
@@ -169,10 +240,11 @@ const startStatusPolling = () => {
         keyMonitorActive.value = data.active
         if (data.active) {
           isStarting.value = false
-          keyMonitorSequence.value = data.live_sequence || ''
+          syncCapturedSequence(data.live_sequence || '')
         } else {
-          if (!isStarting.value) {
-            keyMonitorSequence.value = data.latest_sequence || ''
+          keyMonitorSequence.value = data.latest_sequence || ''
+          if (!isStarting.value && !sequenceDirty.value) {
+            editableSequence.value = data.latest_sequence || ''
           }
         }
         keyMonitorError.value = data.last_error || ''
@@ -187,7 +259,7 @@ const startStatusPolling = () => {
 }
 
 const startKeyMonitor = async () => {
-  keyMonitorSequence.value = ''
+  syncCapturedSequence('')
   keyMonitorError.value = ''
   isStarting.value = true
   try {
@@ -206,87 +278,21 @@ const startKeyMonitor = async () => {
   } catch {}
 }
 
-const loadExcelFiles = async () => {
+const loadCorrectionRules = async () => {
   try {
-    const res = await fetch('/api/excel/files')
-    if (res.ok) {
-      const data = await res.json()
-      excelFiles.value = data.files || []
-      if (!selectedExcel.value && excelFiles.value.length > 0) {
-        selectedExcel.value = excelFiles.value[0]
-      }
-    }
-  } catch {}
-}
-
-const writeToExcel = async () => {
-  if (keyMonitorActive.value || isStarting.value) {
-    alert('监听进行中，停止后再写入')
-    return
-  }
-  if (!selectedExcel.value) {
-    alert('请选择目标Excel文件')
-    return
-  }
-  if (!keyMonitorSequence.value) {
-    alert('当前没有可写入的序列')
-    return
-  }
-  if (selectedRow.value === null || !selectedCol.value) {
-    alert('请在下方表格中选择一个单元格作为写入目标')
-    return
-  }
-  const seq = compressAdjacent(keyMonitorSequence.value)
-  try {
-    const res = await fetch('/api/excel/write_cell', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_name: selectedExcel.value, column_name: selectedCol.value, row_index: selectedRow.value, value: seq })
-    })
+    const res = await fetch('/api/keymonitor/mappings')
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data?.detail || '写入失败')
-    }
-    await analyzeExcel()
-    alert('写入成功：已写入所选单元格')
-  } catch (e) {
-    alert(`写入失败：${e.message}`)
-  }
-}
-
-const analyzeExcel = async () => {
-  if (!selectedExcel.value) {
-    alert('请选择目标Excel文件')
-    return
-  }
-  loadingPreview.value = true
-  previewColumns.value = []
-  previewRows.value = []
-  try {
-    const url = `/api/excel/preview?file_name=${encodeURIComponent(selectedExcel.value)}`
-    const res = await fetch(url)
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data?.detail || '分析失败')
+      throw new Error('加载纠正规则失败')
     }
     const data = await res.json()
-    previewColumns.value = data.columns || []
-    previewRows.value = data.rows || []
-    previewTotal.value = data.row_count || previewRows.value.length
-  } catch (e) {
-    alert(`分析失败：${e.message}`)
-  } finally {
-    loadingPreview.value = false
+    savedMappings.value = data.mappings || {}
+    validMonitorTargets.value = (data.valid_targets && data.valid_targets.length > 0)
+      ? data.valid_targets
+      : defaultValidMonitorKeys
+    mappingError.value = ''
+  } catch (error) {
+    mappingError.value = error.message || '加载纠正规则失败'
   }
-}
-
-const selectCell = (r, c) => {
-  if (keyMonitorActive.value || isStarting.value) return
-  selectedRow.value = r
-  selectedCol.value = c
-}
-const isSelectedCell = (r, c) => {
-  return selectedRow.value === r && selectedCol.value === c
 }
 
 const stopKeyMonitor = async () => {
@@ -296,7 +302,7 @@ const stopKeyMonitor = async () => {
       const data = await res.json()
       keyMonitorActive.value = false
       isStarting.value = false
-      if (data.sequence) keyMonitorSequence.value = data.sequence
+      syncCapturedSequence(data.sequence || '')
       apiUnavailable.value = false
     }
   } catch {}
@@ -307,8 +313,8 @@ const copySequence = async () => {
     alert('监听进行中，停止后再复制序列')
     return
   }
-  if (!keyMonitorSequence.value) return
-  const compressed = compressAdjacent(keyMonitorSequence.value)
+  if (!workingSequence.value) return
+  const compressed = compressAdjacent(workingSequence.value)
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(compressed)
@@ -322,6 +328,69 @@ const copySequence = async () => {
     }
     alert('序列已复制（已合并相邻相同指令）')
   } catch {}
+}
+
+const handleEditableSequenceInput = () => {
+  sequenceDirty.value = true
+}
+
+const restoreCapturedSequence = () => {
+  editableSequence.value = keyMonitorSequence.value
+  sequenceDirty.value = false
+  replaceSourceKey.value = ''
+  replaceTargetKey.value = ''
+}
+
+const saveCorrectionRule = async () => {
+  const sourceKey = replaceSourceKey.value.trim().toUpperCase()
+  const targetKey = replaceTargetKey.value.trim().toUpperCase()
+  if (!sourceKey || !targetKey) {
+    return
+  }
+
+  if (!validMonitorTargetSet.value.has(targetKey)) {
+    mappingError.value = `不支持保存为指令：${targetKey}`
+    return
+  }
+
+  savingMapping.value = true
+  try {
+    const res = await fetch('/api/keymonitor/mappings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_key: sourceKey, target_key: targetKey })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.success === false) {
+      throw new Error(data?.message || data?.detail || '保存纠正规则失败')
+    }
+
+    savedMappings.value = data.mappings || {}
+    keyMonitorSequence.value = data.latest_sequence || replaceCommandInSequence(keyMonitorSequence.value, sourceKey, targetKey)
+    editableSequence.value = replaceCommandInSequence(editableSequence.value, sourceKey, targetKey)
+    sequenceDirty.value = editableSequence.value !== keyMonitorSequence.value
+    replaceSourceKey.value = ''
+    replaceTargetKey.value = ''
+    mappingError.value = ''
+  } catch (error) {
+    mappingError.value = error.message || '保存纠正规则失败'
+  } finally {
+    savingMapping.value = false
+  }
+}
+
+const removeCorrectionRule = async (sourceKey) => {
+  try {
+    const res = await fetch(`/api/keymonitor/mappings/${encodeURIComponent(sourceKey)}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.success === false) {
+      throw new Error(data?.message || data?.detail || '删除纠正规则失败')
+    }
+    savedMappings.value = data.mappings || {}
+    mappingError.value = ''
+  } catch (error) {
+    mappingError.value = error.message || '删除纠正规则失败'
+  }
 }
 
 function compressAdjacent(seq) {

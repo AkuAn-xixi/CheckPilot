@@ -132,7 +132,7 @@ const executeCommands = async () => {
   executionResults.value = []
   
   try {
-    const response = await fetch('/api/commands/execute', {
+    const response = await fetch('/api/devices/commands/execute', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -141,7 +141,14 @@ const executeCommands = async () => {
     })
     
     if (!response.ok) {
-      throw new Error('执行命令失败')
+      let errorMessage = '执行命令失败'
+      try {
+        const errorData = await response.json()
+        errorMessage = errorData.detail || errorMessage
+      } catch {
+        // ignore json parse failure and keep fallback message
+      }
+      throw new Error(errorMessage)
     }
     
     const data = await response.json()

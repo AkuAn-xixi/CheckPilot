@@ -10,6 +10,16 @@
     </div>
     
     <div>
+      <input
+        ref="verifyImageFolderInput"
+        type="file"
+        class="hidden"
+        webkitdirectory
+        directory
+        multiple
+        @change="handleVerifyImageFolderChange"
+      >
+
       <!-- 文件选择部分 -->
       <div class="mb-6">
         <h3 class="font-medium mb-3">选择Excel文件</h3>
@@ -175,6 +185,15 @@
                 停止所有执行
               </button>
             </div>
+            <div class="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+              <span>
+                校验图片文件夹：{{ verifyImageFolderName || '未选择，点击校验图片时会自动提示选择' }}
+              </span>
+              <button class="btn btn-secondary btn-sm" @click="triggerVerifyImageFolderPicker()">
+                选择文件夹
+              </button>
+              <span v-if="verifyImageFileCount > 0">已索引 {{ verifyImageFileCount }} 张图片</span>
+            </div>
             <div class="mb-4">
             <table class="border w-full table-auto">
                 <thead class="bg-gray-100">
@@ -241,7 +260,7 @@
                     <td class="border px-3 py-2 whitespace-normal break-words">
                     <span v-if="item.row.verify_image && item.row.verify_image !== 'nan'" 
                           class="cursor-pointer text-primary hover:underline"
-                          @click="previewVerifyImage(item.row.verify_image, selectedFile)">
+                            @click="previewVerifyImage(item.row.verify_image)">
                       {{ item.row.verify_image }}
                       </span>
                       <span v-else>-</span>
@@ -353,23 +372,59 @@
     </div>
   </div>
 
-  <!-- 截图弹窗 -->
+  <!-- 执行结果弹窗 -->
   <div v-if="showScreenshotModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl p-4 w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden">
+    <div class="bg-white rounded-lg shadow-xl p-4 w-[95vw] max-w-[95vw] h-[90vh] max-h-[90vh] overflow-hidden flex flex-col">
       <div class="flex justify-between items-center mb-2">
-        <h3 class="text-lg font-medium">执行截图</h3>
+        <div>
+          <h3 class="text-lg font-medium">执行结果对比</h3>
+          <p v-if="modalResultTitle" class="text-sm text-gray-500 mt-1">
+            {{ modalResultTitle }}
+          </p>
+        </div>
         <button @click="showScreenshotModal = false" class="text-gray-500 hover:text-gray-700">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
-      <div class="flex justify-center items-center h-[calc(90vh-60px)]">
-        <img 
-          :src="modalScreenshotUrl + '?t=' + Date.now()" 
-          class="max-h-full max-w-full object-contain" 
-          alt="执行截图"
+      <div class="mb-3 flex flex-wrap items-center gap-3 text-sm">
+        <span v-if="modalResultStatus"
+          class="px-3 py-1 rounded-full font-medium"
+          :class="modalResultStatus === 'PASS' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
         >
+          {{ modalResultStatus }}
+        </span>
+        <span v-if="modalResultScore !== null" class="text-gray-600">
+          匹配分数: {{ Number(modalResultScore).toFixed(3) }}
+        </span>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0 overflow-auto">
+        <div class="border rounded-lg p-3 flex flex-col min-h-[320px]">
+          <h4 class="font-medium mb-3">ADB截图</h4>
+          <div class="flex-1 flex justify-center items-center bg-gray-50 rounded-lg overflow-hidden">
+            <img 
+              v-if="modalScreenshotUrl"
+              :src="modalScreenshotUrl + '?t=' + Date.now()" 
+              class="max-h-full max-w-full object-contain" 
+              alt="执行截图"
+            >
+            <span v-else class="text-gray-400">暂无截图</span>
+          </div>
+        </div>
+        <div class="border rounded-lg p-3 flex flex-col min-h-[320px]">
+          <h4 class="font-medium mb-3">用例校验图</h4>
+          <p v-if="modalVerifyImageName" class="text-sm text-gray-500 mb-2">{{ modalVerifyImageName }}</p>
+          <div class="flex-1 flex justify-center items-center bg-gray-50 rounded-lg overflow-hidden">
+            <img 
+              v-if="modalVerifyImageUrl"
+              :src="modalVerifyImageUrl" 
+              class="max-h-full max-w-full object-contain" 
+              alt="校验图片"
+            >
+            <span v-else class="text-gray-400">该用例未配置校验图</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -378,7 +433,10 @@
   <div v-if="showVerifyImageModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
     <div class="bg-white rounded-lg shadow-xl p-4 w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] overflow-hidden">
       <div class="flex justify-between items-center mb-2">
-        <h3 class="text-lg font-medium">校验图片预览</h3>
+        <div>
+          <h3 class="text-lg font-medium">校验图片预览</h3>
+          <p v-if="verifyImagePreviewName" class="text-sm text-gray-500 mt-1">{{ verifyImagePreviewName }}</p>
+        </div>
         <button @click="showVerifyImageModal = false" class="text-gray-500 hover:text-gray-700">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -387,17 +445,19 @@
       </div>
       <div class="flex justify-center items-center h-[calc(90vh-60px)]">
         <img 
-          :src="verifyImageUrl + (verifyImageUrl.includes('?') ? '&' : '?') + 't=' + Date.now()" 
+          v-if="verifyImageUrl"
+          :src="verifyImageUrl" 
           class="max-h-full max-w-full object-contain" 
           alt="校验图片"
         >
+        <span v-else class="text-gray-400">未找到同名校验图片</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 
 // 状态管理
@@ -416,10 +476,22 @@ const selectedRows = ref([])
 const filterResult = ref('')
 const searchKeyword = ref('')
 const rowScreenshots = ref({})
+const rowResultMeta = ref({})
 const showScreenshotModal = ref(false)
 const modalScreenshotUrl = ref('')
+const modalVerifyImageUrl = ref('')
+const modalVerifyImageName = ref('')
+const modalResultTitle = ref('')
+const modalResultStatus = ref('')
+const modalResultScore = ref(null)
 const showVerifyImageModal = ref(false)
 const verifyImageUrl = ref('')
+const verifyImagePreviewName = ref('')
+const verifyImageFolderInput = ref(null)
+const verifyImageFolderName = ref('')
+const verifyImageFileCount = ref(0)
+const localVerifyImageMap = ref({})
+const pendingVerifyImageRequest = ref(null)
 const currentPage = ref(1)
 const jumpPage = ref(1)
 const pageSize = ref(20)
@@ -465,6 +537,10 @@ onBeforeRouteLeave((to, from, next) => {
     // 没有截图，直接离开
     next()
   }
+})
+
+onUnmounted(() => {
+  clearLocalVerifyImageCache()
 })
 
  
@@ -543,7 +619,138 @@ const selectFile = (file) => {
   excelAnalysis.value = null
   validationResult.value = null
   executionResults.value = []
+  rowScreenshots.value = {}
+  rowResultMeta.value = {}
   rowIndex.value = 1
+}
+
+const normalizeVerifyImageName = (imageName) => {
+  return String(imageName || '')
+    .split(/[/\\]/)
+    .pop()
+    ?.trim()
+    .toLowerCase() || ''
+}
+
+const getLocalVerifyImageEntry = (imageName) => {
+  const key = normalizeVerifyImageName(imageName)
+  return key ? localVerifyImageMap.value[key] || null : null
+}
+
+const clearLocalVerifyImageCache = () => {
+  Object.values(localVerifyImageMap.value).forEach((entry) => {
+    if (entry?.url) {
+      URL.revokeObjectURL(entry.url)
+    }
+  })
+  localVerifyImageMap.value = {}
+  verifyImageFileCount.value = 0
+  verifyImageFolderName.value = ''
+}
+
+const triggerVerifyImageFolderPicker = (request = null) => {
+  pendingVerifyImageRequest.value = request
+  verifyImageFolderInput.value?.click()
+}
+
+const inferFolderName = (files) => {
+  const firstFile = files[0]
+  if (!firstFile) return ''
+  const relativePath = firstFile.webkitRelativePath || ''
+  if (!relativePath.includes('/')) return '已选择本地文件夹'
+  return relativePath.split('/')[0]
+}
+
+const applyVerifyImagePreview = (imageName) => {
+  const matchedEntry = getLocalVerifyImageEntry(imageName)
+  if (!matchedEntry) {
+    return false
+  }
+
+  verifyImagePreviewName.value = matchedEntry.relativePath || matchedEntry.name
+  verifyImageUrl.value = matchedEntry.url
+  showVerifyImageModal.value = true
+  return true
+}
+
+const openExecutionResultModal = (rowIndex, matchedEntry = null) => {
+  const rowData = excelAnalysis.value?.valid_rows?.[rowIndex - 1]
+  if (!rowData || !rowScreenshots.value[rowIndex]) {
+    return
+  }
+
+  const verifyImageName = rowData.verify_image && rowData.verify_image !== 'nan'
+    ? rowData.verify_image
+    : ''
+
+  modalScreenshotUrl.value = rowScreenshots.value[rowIndex]
+  modalVerifyImageName.value = matchedEntry
+    ? (matchedEntry.relativePath || matchedEntry.name)
+    : verifyImageName
+  modalVerifyImageUrl.value = matchedEntry?.url || ''
+  modalResultTitle.value = rowData.title || `第 ${rowIndex} 行`
+  modalResultStatus.value = rowResultMeta.value[rowIndex]?.verify_result || rowData.result || rowData.test_result || ''
+  modalResultScore.value = rowResultMeta.value[rowIndex]?.score ?? null
+  showScreenshotModal.value = true
+}
+
+const handleVerifyImageFolderChange = (event) => {
+  const files = Array.from(event.target.files || [])
+  const pendingRequest = pendingVerifyImageRequest.value
+  pendingVerifyImageRequest.value = null
+
+  if (verifyImageFolderInput.value) {
+    verifyImageFolderInput.value.value = ''
+  }
+
+  if (files.length === 0) {
+    return
+  }
+
+  clearLocalVerifyImageCache()
+
+  const nextImageMap = {}
+  for (const file of files) {
+    const isImageFile = file.type.startsWith('image/') || /\.(png|jpg|jpeg|bmp|webp)$/i.test(file.name)
+    if (!isImageFile) {
+      continue
+    }
+
+    const key = normalizeVerifyImageName(file.name)
+    if (!key || nextImageMap[key]) {
+      continue
+    }
+
+    nextImageMap[key] = {
+      name: file.name,
+      relativePath: file.webkitRelativePath || file.name,
+      url: URL.createObjectURL(file),
+      file
+    }
+  }
+
+  localVerifyImageMap.value = nextImageMap
+  verifyImageFileCount.value = Object.keys(nextImageMap).length
+  verifyImageFolderName.value = inferFolderName(files)
+
+  if (!pendingRequest) {
+    return
+  }
+
+  if (pendingRequest.mode === 'preview') {
+    if (!applyVerifyImagePreview(pendingRequest.imageName)) {
+      alert(`在所选文件夹中未找到同名图片：${pendingRequest.imageName}`)
+    }
+    return
+  }
+
+  if (pendingRequest.mode === 'result') {
+    const matchedEntry = getLocalVerifyImageEntry(pendingRequest.imageName)
+    openExecutionResultModal(pendingRequest.rowIndex, matchedEntry)
+    if (!matchedEntry) {
+      alert(`在所选文件夹中未找到同名图片：${pendingRequest.imageName}`)
+    }
+  }
 }
 
 // 分析文件
@@ -591,6 +798,38 @@ const executeExcelRow = async () => {
   await executeExcelRowByIndex(rowIndex.value)
 }
 
+const readFileAsBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      resolve(result.includes(',') ? result.split(',')[1] : result)
+    }
+    reader.onerror = () => reject(new Error('读取校验图片失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+const buildExecutionPayload = async (index) => {
+  const payload = {
+    file_name: selectedFile.value,
+    row_index: index
+  }
+
+  const rowData = excelAnalysis.value?.valid_rows?.[index - 1]
+  if (!rowData?.verify_image) {
+    return payload
+  }
+
+  const matchedEntry = getLocalVerifyImageEntry(rowData.verify_image)
+  if (!matchedEntry?.file) {
+    return payload
+  }
+
+  payload.verify_image_base64 = await readFileAsBase64(matchedEntry.file)
+  return payload
+}
+
 
 
 // 执行Excel行（通过点击按钮）
@@ -616,18 +855,15 @@ const executeExcelRowByIndex = (index) => {
     if (!isBatchExecuting.value) {
       executionResults.value = []
     }
-    
-    // 使用fetch API发送请求并获取可读流
-    fetch('http://localhost:8003/api/excel/execute', {
+
+    buildExecutionPayload(index)
+    .then((payload) => fetch('/api/excel/execute', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ 
-        file_name: selectedFile.value, 
-        row_index: index 
-      })
-    })
+      body: JSON.stringify(payload)
+    }))
     .then(response => {
       if (!response.ok) {
         throw new Error('执行命令失败')
@@ -680,6 +916,10 @@ const executeExcelRowByIndex = (index) => {
                   }
                   // 如果有验证结果，更新执行结果
                   if (result.verify_result) {
+                    rowResultMeta.value[index] = {
+                      verify_result: result.verify_result,
+                      score: result.score ?? null
+                    }
                     // 找到对应的行并更新结果
                     const rowData = excelAnalysis.value.valid_rows[index - 1]
                     if (rowData) {
@@ -728,28 +968,47 @@ const stopExecution = (index) => {
 
 // 显示执行结果
 const showExecutionResult = (rowIndex) => {
-  console.log('showExecutionResult called with rowIndex:', rowIndex)
-  console.log('rowScreenshots.value:', rowScreenshots.value)
-  if (rowScreenshots.value[rowIndex]) {
-    console.log('Found screenshot for row:', rowScreenshots.value[rowIndex])
-    modalScreenshotUrl.value = rowScreenshots.value[rowIndex]
-    showScreenshotModal.value = true
-  } else {
-    console.log('No screenshot found for row:', rowIndex)
+  const rowData = excelAnalysis.value?.valid_rows?.[rowIndex - 1]
+  if (!rowScreenshots.value[rowIndex] || !rowData) {
+    return
   }
+
+  const verifyImageName = rowData.verify_image && rowData.verify_image !== 'nan'
+    ? rowData.verify_image
+    : ''
+
+  if (!verifyImageName) {
+    openExecutionResultModal(rowIndex, null)
+    return
+  }
+
+  const matchedEntry = getLocalVerifyImageEntry(verifyImageName)
+  if (matchedEntry) {
+    openExecutionResultModal(rowIndex, matchedEntry)
+    return
+  }
+
+  triggerVerifyImageFolderPicker({
+    mode: 'result',
+    rowIndex,
+    imageName: verifyImageName
+  })
 }
 
 // 预览校验图片
-const previewVerifyImage = (imageName, excelFileName) => {
-  try {
-    // 使用相对路径，通过Vite代理访问后端API
-    const imageUrl = `/api/excel/verify_image?file_name=${encodeURIComponent(excelFileName)}&image_name=${encodeURIComponent(imageName)}`
-    verifyImageUrl.value = imageUrl
-    showVerifyImageModal.value = true
-  } catch (error) {
-    console.error('预览图片失败:', error)
-    alert('预览图片失败: ' + error.message)
+const previewVerifyImage = (imageName) => {
+  if (!imageName || imageName === 'nan') {
+    return
   }
+
+  if (applyVerifyImagePreview(imageName)) {
+    return
+  }
+
+  triggerVerifyImageFolderPicker({
+    mode: 'preview',
+    imageName
+  })
 }
 
 // 切换单行选择

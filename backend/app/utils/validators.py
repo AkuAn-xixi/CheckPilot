@@ -2,13 +2,14 @@
 import openpyxl
 from collections import Counter
 from typing import Dict, List, Any
+from app.utils.path_resolver import resolve_image_file
 
 VALID_KEYS = {
     "OK", "RIGHT", "UP", "LEFT", "DOWN", "SETTING", "HOME", "POWER", "BACK",
     "SOURCE", "MENU", "CHUP", "CHDOWN", "DIGITAL", "EXITMENU", "DIGITAL1",
     "DIGITAL2", "DIGITAL3", "DIGITAL4", "DIGITAL5", "DIGITAL6", "DIGITAL7",
     "DIGITAL8", "DIGITAL9", "DIGITAL0", "LIBRARY", "TV_AV", "VOLUMEUP",
-    "VOLUMEDOWN", "NETFLIX", "YOUTUBE", "PRIME_VIDEO", "ACTION3", "APPS", "FILES", "MUTE"
+    "VOLUMEDOWN", "NETFLIX", "YOUTUBE", "PRIME_VIDEO", "ACTION3", "APPS", "FILES", "MUTE","DISCOVERY"
 }
 
 class ExcelValidator:
@@ -70,8 +71,15 @@ class ExcelValidator:
             if cell_value == "None" or not cell_value.strip():
                 continue
 
-            if not cell_value.lower().endswith(".png"):
-                errors.append(f"I{row} 必须为PNG文件格式，当前值: {cell_value}")
+            image_path_value = cell_value.strip()
+            lower_path = image_path_value.lower()
+            if not lower_path.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp")):
+                errors.append(f"I{row} 必须为图片路径，支持 png/jpg/jpeg/bmp/webp，当前值: {cell_value}")
+                continue
+
+            # resolved_image_path = resolve_image_file(image_path_value, excel_file_path=file_path)
+            # if not resolved_image_path.exists():
+            #     warnings.append(f"I{row} 图片路径不存在: {image_path_value}")
 
         for row in range(2, sheet.max_row + 1):
             cell_value = str(sheet.cell(row=row, column=10).value)

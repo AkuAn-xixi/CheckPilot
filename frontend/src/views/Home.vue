@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6">
+  <div>
     <section class="card home-hero">
       <div class="home-hero-grid">
         <div>
@@ -58,51 +58,6 @@
         </article>
       </div>
     </section>
-
-    <div class="grid grid-cols-1 xl:grid-cols-[1.15fr_.85fr] gap-6">
-      <section class="card">
-        <p class="eyebrow">Capabilities</p>
-        <h3 class="section-title">把分散动作整理成一条顺滑的回归路径</h3>
-
-        <div class="feature-grid">
-          <article v-for="feature in features" :key="feature.title" class="feature-card">
-            <span class="feature-kicker">{{ feature.kicker }}</span>
-            <h4>{{ feature.title }}</h4>
-            <p>{{ feature.description }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="card">
-        <p class="eyebrow">Live Devices</p>
-        <h3 class="section-title">当前设备概览</h3>
-
-        <div v-if="devices.length" class="device-list">
-          <article
-            v-for="(device, index) in devices"
-            :key="device"
-            class="device-item"
-            :class="{ active: currentDevice === device }"
-          >
-            <div>
-              <p class="device-index">设备 {{ String(index + 1).padStart(2, '0') }}</p>
-              <strong>{{ device }}</strong>
-            </div>
-            <span class="device-badge">{{ currentDevice === device ? '当前控制' : '可切换' }}</span>
-          </article>
-        </div>
-
-        <div v-else class="empty-state">
-          <p>还没有检测到 ADB 设备。</p>
-          <p class="text-sm text-gray-500">确认 USB 调试、驱动和线缆状态后，再刷新设备列表。</p>
-        </div>
-
-        <div class="home-actions mt-6">
-          <router-link to="/devices" class="btn btn-secondary">管理设备</router-link>
-          <router-link to="/keymonitor" class="btn btn-secondary">打开按键监听</router-link>
-        </div>
-      </section>
-    </div>
   </div>
 </template>
 
@@ -111,29 +66,6 @@ import { onMounted, ref } from 'vue'
 
 const devices = ref([])
 const currentDevice = ref('')
-
-const features = [
-  {
-    kicker: '01',
-    title: '设备连接更直接',
-    description: '统一查看当前可用设备，避免在执行前来回确认连接状态。'
-  },
-  {
-    kicker: '02',
-    title: '脚本回放更完整',
-    description: '从 Excel 直接驱动指令、截图和图像校验，把执行与验证收在同一流程。'
-  },
-  {
-    kicker: '03',
-    title: '结果回看更顺手',
-    description: '执行完成后保留截图和参考图的对照关系，问题定位更快。'
-  },
-  {
-    kicker: '04',
-    title: '按键监听更清晰',
-    description: '把采集、纠错和恢复动作放在一处，方便整理遥控器映射。'
-  }
-]
 
 onMounted(async () => {
   await loadDevices()
@@ -266,77 +198,6 @@ const loadCurrentDevice = async () => {
   line-height: 1.7;
 }
 
-.section-title {
-  margin-top: 10px;
-  margin-bottom: 18px;
-  font-size: 1.55rem;
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.feature-card {
-  padding: 18px 20px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.68);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.feature-card h4 {
-  margin-top: 12px;
-  font-size: 1.1rem;
-}
-
-.device-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.device-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: center;
-  padding: 16px 18px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-}
-
-.device-item strong {
-  display: block;
-  margin-top: 8px;
-}
-
-.device-item.active {
-  background: linear-gradient(135deg, rgba(10, 132, 255, 0.12), rgba(255, 255, 255, 0.8));
-  border-color: rgba(0, 113, 227, 0.16);
-}
-
-.device-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 88px;
-  padding: 0.55rem 0.8rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
-  color: #4b5563;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.empty-state {
-  padding: 18px 0 6px;
-  color: #4b5563;
-  line-height: 1.7;
-}
-
 @media (max-width: 1100px) {
   .home-hero-grid,
   .home-stat-grid {
@@ -345,13 +206,8 @@ const loadCurrentDevice = async () => {
 }
 
 @media (max-width: 720px) {
-  .feature-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .device-item {
-    flex-direction: column;
-    align-items: flex-start;
+  .home-title {
+    max-width: 100%;
   }
 }
 </style>

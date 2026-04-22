@@ -56,21 +56,6 @@
             </router-link>
           </nav>
         </section>
-
-        <section class="card sidebar-status">
-          <p class="eyebrow">System</p>
-          <div class="status-row">
-            <span>设备</span>
-            <strong>{{ currentDevice || '未选择' }}</strong>
-          </div>
-          <div class="status-row">
-            <span>状态</span>
-            <strong>{{ statusMessage }}</strong>
-          </div>
-          <p class="sidebar-note">
-            先完成设备绑定，再进行命令执行、Excel 回放或截图校验，整个流程会更稳定。
-          </p>
-        </section>
       </aside>
 
       <section class="app-content">
@@ -283,7 +268,7 @@ onMounted(async () => {
   top: 24px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
 }
 
 .sidebar-header,
@@ -293,8 +278,7 @@ onMounted(async () => {
   gap: 16px;
 }
 
-.sidebar-panel,
-.sidebar-status {
+.sidebar-panel {
   padding: 22px;
 }
 
@@ -342,33 +326,10 @@ onMounted(async () => {
   color: #6b7280;
   line-height: 1.5;
 }
-
-.status-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-  color: #4b5563;
-}
-
-.status-row strong {
-  color: #111827;
-  text-align: right;
-}
-
-.status-row:last-of-type {
-  border-bottom: 0;
-}
-
 .sidebar-note,
 .page-banner-copy {
   color: #6b7280;
   line-height: 1.7;
-}
-
-.sidebar-note {
-  margin-top: 16px;
 }
 
 .page-banner {

@@ -59,14 +59,6 @@
       </aside>
 
       <section class="app-content">
-        <div class="card page-banner">
-          <div>
-            <p class="eyebrow">Current Space</p>
-            <h2 class="page-banner-title">{{ currentSection.label }}</h2>
-          </div>
-          <p class="page-banner-copy">{{ currentSection.description }}</p>
-        </div>
-
         <router-view />
       </section>
     </main>
@@ -271,8 +263,7 @@ onMounted(async () => {
   gap: 0;
 }
 
-.sidebar-header,
-.page-banner {
+.sidebar-header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -282,8 +273,7 @@ onMounted(async () => {
   padding: 22px;
 }
 
-.sidebar-title,
-.page-banner-title {
+.sidebar-title {
   margin-top: 8px;
   font-size: 1.45rem;
   letter-spacing: -0.04em;
@@ -326,20 +316,6 @@ onMounted(async () => {
   color: #6b7280;
   line-height: 1.5;
 }
-.sidebar-note,
-.page-banner-copy {
-  color: #6b7280;
-  line-height: 1.7;
-}
-
-.page-banner {
-  align-items: end;
-  padding: 24px 26px;
-}
-
-.page-banner-copy {
-  max-width: 42ch;
-}
 
 .app-content {
   min-width: 0;
@@ -374,7 +350,6 @@ onMounted(async () => {
   }
 
   .app-topbar-inner,
-  .page-banner,
   .sidebar-header {
     flex-direction: column;
   }

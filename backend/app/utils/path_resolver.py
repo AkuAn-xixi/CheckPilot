@@ -2,10 +2,13 @@
 import os
 from pathlib import Path
 from typing import List, Optional
+from ..config import settings
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[2]
-PROJECT_ROOT = BACKEND_DIR.parent
+BUNDLE_DIR = settings.BUNDLE_DIR
+WORKING_DIR = settings.WORKING_DIR
+BACKEND_DIR = BUNDLE_DIR / "backend"
+PROJECT_ROOT = WORKING_DIR
 
 
 def _unique_paths(paths: List[Path]) -> List[Path]:
@@ -22,8 +25,9 @@ def _unique_paths(paths: List[Path]) -> List[Path]:
 
 def get_test_cases_candidates() -> List[Path]:
     return _unique_paths([
+        settings.TEST_CASES_DIR,
         BACKEND_DIR / "test_cases",
-        PROJECT_ROOT / "test_cases",
+        BUNDLE_DIR / "test_cases",
         Path.cwd() / "test_cases",
     ])
 
@@ -39,7 +43,7 @@ def _get_existing_subdir(name: str) -> Path | None:
 def get_excel_dir(create: bool = False) -> Path:
     excel_dir = _get_existing_subdir("excel")
     if excel_dir is None:
-        excel_dir = BACKEND_DIR / "test_cases" / "excel"
+        excel_dir = settings.TEST_CASES_DIR / "excel"
     if create:
         excel_dir.mkdir(parents=True, exist_ok=True)
     return excel_dir
@@ -48,7 +52,7 @@ def get_excel_dir(create: bool = False) -> Path:
 def get_image_dir() -> Path:
     image_dir = _get_existing_subdir("images")
     if image_dir is None:
-        image_dir = BACKEND_DIR / "test_cases" / "images"
+        image_dir = settings.TEST_CASES_DIR / "images"
     return image_dir
 
 
@@ -97,7 +101,8 @@ def resolve_image_file(
             get_image_dir() / normalized_path,
             get_image_dir() / normalized_path.name,
             Path.cwd() / normalized_path,
-            PROJECT_ROOT / normalized_path,
+            WORKING_DIR / normalized_path,
+            BUNDLE_DIR / normalized_path,
             BACKEND_DIR / normalized_path,
         ])
 

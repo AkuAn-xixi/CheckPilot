@@ -5,6 +5,7 @@ import os
 import re
 import pandas as pd
 from typing import List, Optional, Dict, Any
+from ..config import settings
 
 KEYCODE_MAP = {
     "OK": 23,
@@ -86,6 +87,11 @@ class ADBController:
         self.device_serial = device_serial
         return True
 
+    def _normalize_excel_text(self, value: Any) -> str:
+        if value is None or pd.isna(value):
+            return ""
+        return str(value).strip()
+
     def send_keyevent(self, keycode: int, keyname: str, delay: float = 0) -> bool:
         """发送ADB keyevent并可选延迟"""
         if not 1 <= keycode <= 999:
@@ -138,43 +144,122 @@ class ADBController:
 
         return results
 
-    def take_screenshot(self, title: Optional[str] = None) -> Optional[str]:
-        """使用ADB截图"""
-        device_arg = f"-s {self.device_serial} " if self.device_serial else ""
+    def _adb_command(self, *args: str) -> List[str]:
+        command = ["adb"]
+        if self.device_serial:
+            command.extend(["-s", self.device_serial])
+        command.extend(args)
+        return command
 
-        if title:
-            safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)
-            local_path = f"{safe_title}.png"
-        else:
-            ts = int(time.time() * 1000)
-            local_path = f"screenshot_{ts}.png"
+    def _remove_local_file(self, file_path) -> None:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except OSError:
+            pass
 
+    def _cleanup_remote_file(self, remote_path: str) -> None:
+        try:
+            subprocess.run(
+                self._adb_command("shell", "rm", remote_path),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+
+    def _is_valid_png(self, file_path) -> bool:
+        try:
+            if not file_path.exists() or file_path.stat().st_size <= 8:
+                return False
+            with file_path.open("rb") as image_file:
+                return image_file.read(8) == b"\x89PNG\r\n\x1a\n"
+        except OSError:
+            return False
+
+    def _take_screenshot_via_exec_out(self, local_path) -> bool:
+        try:
+            with local_path.open("wb") as image_file:
+                subprocess.run(
+                    self._adb_command("exec-out", "screencap", "-p"),
+                    check=True,
+                    stdout=image_file,
+                    stderr=subprocess.PIPE,
+                )
+        except (subprocess.CalledProcessError, OSError) as e:
+            self._remove_local_file(local_path)
+            print(f"exec-out截图失败: {e}")
+            return False
+
+        if self._is_valid_png(local_path):
+            print(f"截图成功，保存到: {local_path}")
+            return True
+
+        self._remove_local_file(local_path)
+        print("exec-out截图失败: 输出不是有效PNG")
+        return False
+
+    def _take_screenshot_via_remote_file(self, local_path, file_name: str) -> Optional[str]:
         remote_candidates = [
-            f"/data/local/tmp/{os.path.basename(local_path)}",
-            f"/sdcard/{os.path.basename(local_path)}",
+            f"/data/local/tmp/{file_name}",
+            f"/sdcard/{file_name}",
         ]
 
         for remote_path in remote_candidates:
             try:
-                cmd_cap = f"adb {device_arg}shell screencap -p {remote_path}"
-                subprocess.run(cmd_cap, shell=True, check=True)
-                time.sleep(0.1)
-                cmd_pull = f"adb {device_arg}pull {remote_path} {local_path}"
-                subprocess.run(cmd_pull, shell=True, check=True)
+                subprocess.run(
+                    self._adb_command("shell", "screencap", "-p", remote_path),
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
 
-                try:
-                    subprocess.run(f"adb {device_arg}shell rm {remote_path}", shell=True)
-                except Exception:
-                    pass
+                for attempt in range(3):
+                    try:
+                        subprocess.run(
+                            self._adb_command("pull", remote_path, str(local_path)),
+                            check=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        self._remove_local_file(local_path)
+                        print(f"截图拉取失败（尝试 {attempt + 1}/3，{remote_path}）: {e}")
+                        time.sleep(0.3)
+                        continue
 
-                print(f"截图成功，保存到: {local_path}")
-                return local_path
+                    if self._is_valid_png(local_path):
+                        print(f"截图成功，保存到: {local_path}")
+                        return str(local_path)
+
+                    self._remove_local_file(local_path)
+                    print(f"截图文件无效（尝试 {attempt + 1}/3，{remote_path}）")
+                    time.sleep(0.3)
             except subprocess.CalledProcessError as e:
+                self._remove_local_file(local_path)
                 print(f"截图失败（尝试 {remote_path}）: {e}")
                 time.sleep(0.2)
-                continue
+            finally:
+                self._cleanup_remote_file(remote_path)
 
         return None
+
+    def take_screenshot(self, title: Optional[str] = None) -> Optional[str]:
+        """使用ADB截图"""
+        if title:
+            safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)
+            file_name = f"{safe_title}.png"
+        else:
+            ts = int(time.time() * 1000)
+            file_name = f"screenshot_{ts}.png"
+
+        local_path = settings.SCREENSHOT_DIR / file_name
+
+        if self._take_screenshot_via_exec_out(local_path):
+            return str(local_path)
+
+        return self._take_screenshot_via_remote_file(local_path, file_name)
 
     def read_excel_commands(self, excel_path: str, target_row: Optional[int] = None) -> Dict[str, Any]:
         """读取Excel文件中的命令"""
@@ -194,8 +279,8 @@ class ADBController:
                         skipped_rows.append({"row": index+2, "reason": f"runOption不是Y (值为: {str(row['runOption'])})"})
                         continue
 
-                    ori_step = str(row.get('oriStep', '')).strip()
-                    pre_script = str(row.get('preScript', '')).strip()
+                    ori_step = self._normalize_excel_text(row.get('oriStep', ''))
+                    pre_script = self._normalize_excel_text(row.get('preScript', ''))
 
                     if not ori_step and not pre_script:
                         skipped_rows.append({"row": index+2, "reason": "oriStep和preScript列都为空，用例未识别"})
@@ -240,28 +325,18 @@ class ADBController:
                         test_result = ''
 
                         if 'testID' in row:
-                            test_id_value = row['testID']
-                            if test_id_value is not None and str(test_id_value).strip() != '' and str(test_id_value).strip() != 'nan':
-                                title = str(test_id_value).strip()
+                            title = self._normalize_excel_text(row['testID'])
 
                         if 'step' in row:
-                            step_value = row['step']
-                            if step_value is not None and str(step_value).strip() != '' and str(step_value).strip() != 'nan':
-                                step = str(step_value).strip()
+                            step = self._normalize_excel_text(row['step'])
                         elif 'operation' in row:
-                            operation_value = row['operation']
-                            if operation_value is not None and str(operation_value).strip() != '' and str(operation_value).strip() != 'nan':
-                                step = str(operation_value).strip()
+                            step = self._normalize_excel_text(row['operation'])
 
                         if 'checkPic' in row:
-                            check_pic_value = row['checkPic']
-                            if check_pic_value is not None and str(check_pic_value).strip() != '' and str(check_pic_value).strip() != 'nan':
-                                verify_image = str(check_pic_value).strip()
+                            verify_image = self._normalize_excel_text(row['checkPic'])
 
                         if 'testResult' in row:
-                            test_result_value = row['testResult']
-                            if test_result_value is not None and str(test_result_value).strip() != '' and str(test_result_value).strip() != 'nan':
-                                test_result = str(test_result_value).strip()
+                            test_result = self._normalize_excel_text(row['testResult'])
 
                         all_valid_rows.append({
                             "row": index+2,

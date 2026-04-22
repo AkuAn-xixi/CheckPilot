@@ -1,6 +1,6 @@
 """设备服务模块"""
 from typing import List, Optional
-from app.runtime import get_controller
+from ..runtime import get_controller
 
 class DeviceService:
     """设备服务类"""

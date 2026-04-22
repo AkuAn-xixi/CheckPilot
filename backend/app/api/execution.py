@@ -4,10 +4,10 @@ import asyncio
 import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from app.runtime import get_controller, get_current_device
-from app.utils.adb_controller import KEYCODE_MAP
-from app.utils.path_resolver import resolve_excel_file, resolve_image_file
-from app.services.image_service import verify_image_match, verify_image_base64_match
+from ..runtime import get_controller, get_current_device
+from ..utils.adb_controller import KEYCODE_MAP
+from ..utils.path_resolver import resolve_excel_file, resolve_image_file
+from ..services.image_service import verify_image_match, verify_image_base64_match
 
 router = APIRouter(prefix="/api/excel", tags=["execution"])
 

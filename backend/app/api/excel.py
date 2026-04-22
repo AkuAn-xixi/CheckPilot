@@ -2,16 +2,16 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from typing import Optional
-from app.models.schemas import (
+from ..models.schemas import (
     ExcelExecuteRequest,
     AppendSequenceRequest,
     WriteCellRequest,
     ExcelValidationResult,
     ExcelAnalysisResult
 )
-from app.runtime import get_current_device, get_monitor_live_sequence
-from app.services.excel_service import excel_service
-from app.utils.path_resolver import get_excel_dir, resolve_excel_file, resolve_image_file
+from ..runtime import get_current_device, get_monitor_live_sequence
+from ..services.excel_service import excel_service
+from ..utils.path_resolver import get_excel_dir, resolve_excel_file, resolve_image_file
 
 router = APIRouter(prefix="/api/excel", tags=["excel"])
 

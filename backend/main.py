@@ -1,5 +1,5 @@
 """FastAPI应用入口"""
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -11,10 +11,11 @@ import threading
 import math
 import re
 import json
+from pathlib import Path
 
-from app.config import settings
-from app.api import devices_router, excel_router, execution_router
-from app.utils.adb_controller import ADBController, KEYCODE_MAP
+from .app.config import settings
+from .app.api import devices_router, excel_router, execution_router
+from .app.utils.adb_controller import ADBController, KEYCODE_MAP
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -36,7 +37,7 @@ app.include_router(execution_router)
 
 controller = ADBController()
 
-MONITOR_MAPPING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_key_mappings.json")
+MONITOR_MAPPING_FILE = settings.WORKING_DIR / "monitor_key_mappings.json"
 
 current_device = None
 monitor_active = False
@@ -59,6 +60,31 @@ class KeyMonitorMappingRequest(BaseModel):
     source_key: str
     target_key: str
 
+
+def _safe_frontend_path(relative_path: str) -> Path | None:
+    frontend_dir = settings.FRONTEND_DIST_DIR
+    if not frontend_dir.exists():
+        return None
+
+    candidate = (frontend_dir / relative_path).resolve(strict=False)
+    frontend_root = frontend_dir.resolve(strict=False)
+    try:
+        candidate.relative_to(frontend_root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def get_frontend_file(relative_path: str) -> Path | None:
+    candidate = _safe_frontend_path(relative_path)
+    if candidate is not None and candidate.exists() and candidate.is_file():
+        return candidate
+    return None
+
+
+def get_frontend_index() -> Path | None:
+    return get_frontend_file("index.html")
+
 def format_monitor_sequence(sequence: str) -> str:
     """将内部换行分隔的监听序列格式化为前端使用的逗号分隔格式。"""
     if not sequence:
@@ -72,7 +98,7 @@ def normalize_monitor_key(key: str) -> str:
 
 
 def load_monitor_mappings() -> dict[str, str]:
-    if not os.path.exists(MONITOR_MAPPING_FILE):
+    if not MONITOR_MAPPING_FILE.exists():
         return {}
     try:
         with open(MONITOR_MAPPING_FILE, 'r', encoding='utf-8') as fp:
@@ -91,6 +117,7 @@ def load_monitor_mappings() -> dict[str, str]:
 
 
 def save_monitor_mappings(mappings: dict[str, str]) -> None:
+    MONITOR_MAPPING_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(MONITOR_MAPPING_FILE, 'w', encoding='utf-8') as fp:
         json.dump(dict(sorted(mappings.items())), fp, ensure_ascii=True, indent=2)
 
@@ -283,6 +310,9 @@ def monitor_key_events():
 @app.get("/")
 async def root():
     """根路径"""
+    frontend_index = get_frontend_index()
+    if frontend_index is not None:
+        return FileResponse(frontend_index)
     return {"message": "ADB Control API", "version": settings.VERSION}
 
 @app.get("/api/health")
@@ -295,11 +325,13 @@ async def clear_screenshots():
     """清除所有截图"""
     try:
         count = 0
-        for file in os.listdir('.'):
+        screenshot_dir = settings.SCREENSHOT_DIR
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        for file in os.listdir(screenshot_dir):
             if file.endswith('.png') and (file.startswith('screenshot_') or file.startswith('UC_') or
                                            file.startswith('HOME') or file.startswith('UserCenter')):
                 try:
-                    os.remove(file)
+                    os.remove(screenshot_dir / file)
                     count += 1
                 except Exception:
                     pass
@@ -310,8 +342,8 @@ async def clear_screenshots():
 @app.get("/api/screenshot/{filename}")
 async def get_screenshot(filename: str):
     """获取截图"""
-    file_path = os.path.join(os.getcwd(), filename)
-    if not os.path.exists(file_path):
+    file_path = settings.SCREENSHOT_DIR / filename
+    if not file_path.exists():
         return {"error": "截图不存在"}
     return FileResponse(file_path)
 
@@ -405,5 +437,21 @@ async def delete_keymonitor_mapping(source_key: str):
         save_monitor_mappings(MONITOR_USER_MAPPING)
     return {"success": True, "mappings": dict(sorted(MONITOR_USER_MAPPING.items()))}
 
-if os.path.exists("screenshots"):
-    app.mount("/screenshots", StaticFiles(directory="screenshots"), name="screenshots")
+if settings.SCREENSHOT_DIR.exists():
+    app.mount("/screenshots", StaticFiles(directory=settings.SCREENSHOT_DIR), name="screenshots")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    if full_path.startswith("api/") or full_path == "api":
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    frontend_file = get_frontend_file(full_path)
+    if frontend_file is not None:
+        return FileResponse(frontend_file)
+
+    frontend_index = get_frontend_index()
+    if frontend_index is not None:
+        return FileResponse(frontend_index)
+
+    raise HTTPException(status_code=404, detail="Not Found")

@@ -3,7 +3,7 @@ import sys
 from types import ModuleType
 from typing import Optional
 
-from app.utils.adb_controller import ADBController
+from .utils.adb_controller import ADBController
 
 
 class _RuntimeState:

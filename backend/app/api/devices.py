@@ -1,9 +1,9 @@
 """设备API路由模块"""
 from fastapi import APIRouter, HTTPException
-from app.models.schemas import DeviceSelectRequest, CommandExecuteRequest, SingleCommandExecuteRequest
-from app.runtime import get_controller, get_current_device as get_current_device_state, set_current_device
-from app.services.device_service import device_service
-from app.utils.adb_controller import KEYCODE_MAP
+from ..models.schemas import DeviceSelectRequest, CommandExecuteRequest, SingleCommandExecuteRequest
+from ..runtime import get_controller, get_current_device as get_current_device_state, set_current_device
+from ..services.device_service import device_service
+from ..utils.adb_controller import KEYCODE_MAP
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 

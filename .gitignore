@@ -19,3 +19,16 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+
+# 后端
+backend/*.png
+backend/_tmp*
+__pycache__/
+*.pyc
+
+
+# 前端
+node_modules/
+.vite/
+dist/
+.DS_Store

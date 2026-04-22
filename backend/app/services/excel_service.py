@@ -2,9 +2,9 @@
 from pathlib import Path
 import pandas as pd
 from typing import Dict, Any, List
-from app.utils.adb_controller import ADBController
-from app.utils.validators import ExcelValidator
-from app.utils.path_resolver import list_excel_files, resolve_excel_file
+from ..utils.adb_controller import ADBController
+from ..utils.validators import ExcelValidator
+from ..utils.path_resolver import list_excel_files, resolve_excel_file
 
 class ExcelService:
     """Excel服务类"""

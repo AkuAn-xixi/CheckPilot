@@ -2,7 +2,7 @@
 import openpyxl
 from collections import Counter
 from typing import Dict, List, Any
-from app.utils.path_resolver import resolve_image_file
+from .path_resolver import resolve_image_file
 
 VALID_KEYS = {
     "OK", "RIGHT", "UP", "LEFT", "DOWN", "SETTING", "HOME", "POWER", "BACK",

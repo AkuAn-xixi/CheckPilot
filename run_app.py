@@ -5,7 +5,16 @@ import socket
 import threading
 import webbrowser
 import uvicorn
+
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
+if ROOT_DIR not in sys.path:
+  sys.path.insert(0, ROOT_DIR)
+if BACKEND_DIR not in sys.path:
+  sys.path.insert(0, BACKEND_DIR)
+
 from backend.main import app as fastapi_app
+from backend.app.config import settings
 
 def find_port(start=8000, end=8010):
   for p in range(start, end + 1):
@@ -31,7 +40,7 @@ def main():
     server = run_server(port)
     time.sleep(1.2)
     try:
-      with open("adbcontrol_port.txt", "w", encoding="utf-8") as f:
+      with open(settings.WORKING_DIR / "adbcontrol_port.txt", "w", encoding="utf-8") as f:
         f.write(str(port))
     except:
       pass
@@ -47,7 +56,7 @@ def main():
   except Exception as e:
     msg = f"Startup failed: {e}"
     try:
-      with open("adbcontrol_error.log", "a", encoding="utf-8") as f:
+      with open(settings.WORKING_DIR / "adbcontrol_error.log", "a", encoding="utf-8") as f:
         f.write(msg + "\n")
     except:
       pass

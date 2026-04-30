@@ -25,6 +25,15 @@ class WriteCellRequest(BaseModel):
     row_index: int
     value: str
 
+class ExcelCaseFieldsUpdateRequest(BaseModel):
+    file_name: str
+    excel_row: int
+    title: str
+    ori_step: str = ''
+    pre_script: str = ''
+    step: Optional[str] = None
+    verify_image: str
+
 class DeviceInfo(BaseModel):
     serial: str
     status: str

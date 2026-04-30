@@ -1,15 +1,21 @@
 <template>
-            <div class="card w-full max-w-7xl mx-auto">
-              <h2 class="mb-4">Excel执行</h2>
-
-              <div v-if="!selectedDevice" class="bg-yellow-50 p-4 rounded-lg mb-6">
-                <p class="text-warning mb-2">请先在设备管理页面选择一个ADB设备</p>
-                <router-link to="/devices" class="btn btn-primary">
-                  前往设备管理
+            <div class="card w-full max-w-7xl mx-auto excel-execution-page">
+              <div class="mb-4 flex flex-wrap items-center gap-3">
+                <router-link to="/excel" class="btn btn-secondary btn-sm">
+                  返回功能选择
                 </router-link>
+                <h2 class="mb-0">图片校验执行</h2>
               </div>
 
-              <div>
+              <div class="excel-execution-scroll">
+                <div v-if="!selectedDevice" class="bg-yellow-50 p-4 rounded-lg mb-6">
+                  <p class="text-warning mb-2">请先在设备管理页面选择一个ADB设备</p>
+                  <router-link to="/devices" class="btn btn-primary">
+                    前往设备管理
+                  </router-link>
+                </div>
+
+                <div>
                 <input
                   ref="verifyImageFolderInput"
                   type="file"
@@ -259,7 +265,7 @@
                             <col style="width: 170px;">
                             <col>
                             <col style="width: 170px;">
-                            <col style="width: 118px;">
+                            <col style="width: 128px;">
                             <col style="width: 128px;">
                           </colgroup>
                           <thead class="bg-slate-50/90">
@@ -326,20 +332,29 @@
                                 <span v-else>-</span>
                               </td>
                               <td class="border px-3 py-3 text-center align-top">
-                                <button
-                                  v-if="!executingRows[item.idx]"
-                                  @click="executeExcelRowByIndex(item.idx)"
-                                  class="btn btn-primary min-w-[88px] whitespace-nowrap"
-                                >
-                                  执行
-                                </button>
-                                <button
-                                  v-else
-                                  @click="stopExecution(item.idx)"
-                                  class="btn btn-danger min-w-[88px] whitespace-nowrap"
-                                >
-                                  停止执行
-                                </button>
+                                <div class="flex flex-col items-center gap-2">
+                                  <button
+                                    @click="openCaseEditModal(item)"
+                                    class="btn btn-secondary min-w-[88px] whitespace-nowrap"
+                                    :disabled="savingCaseFields || executingRows[item.idx]"
+                                  >
+                                    编辑
+                                  </button>
+                                  <button
+                                    v-if="!executingRows[item.idx]"
+                                    @click="executeExcelRowByIndex(item.idx)"
+                                    class="btn btn-primary min-w-[88px] whitespace-nowrap"
+                                  >
+                                    执行
+                                  </button>
+                                  <button
+                                    v-else
+                                    @click="stopExecution(item.idx)"
+                                    class="btn btn-danger min-w-[88px] whitespace-nowrap"
+                                  >
+                                    停止执行
+                                  </button>
+                                </div>
                               </td>
                               <td class="border px-3 py-3 text-center align-top">
                                 <button
@@ -400,6 +415,7 @@
                       <p class="text-danger">文件中没有找到有效命令。</p>
                     </div>
                   </div>
+                </div>
                 </div>
               </div>
 
@@ -484,11 +500,75 @@
                   </div>
                 </div>
               </div>
+
+              <div v-if="showCaseEditModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div class="bg-white rounded-lg shadow-xl p-6 w-[92vw] max-w-2xl">
+                  <div class="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <h3 class="text-lg font-medium">编辑用例信息</h3>
+                      <p v-if="editingCaseExcelRow" class="text-sm text-gray-500 mt-1">
+                        第 {{ editingCaseExcelRow }} 行，修改后会直接写回当前 Excel 文件。
+                      </p>
+                    </div>
+                    <button @click="closeCaseEditModal" class="text-gray-500 hover:text-gray-700" :disabled="savingCaseFields">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div class="space-y-4">
+                    <div>
+                      <label class="form-label">用例标题</label>
+                      <input
+                        v-model="editingCaseForm.title"
+                        type="text"
+                        class="form-input w-full"
+                        placeholder="请输入用例标题"
+                      >
+                    </div>
+                    <div>
+                      <label class="form-label">原始步骤</label>
+                      <textarea
+                        v-model="editingCaseForm.ori_step"
+                        class="form-input w-full min-h-[120px] resize-y"
+                        placeholder="请输入 oriStep 内容，例如 HOME/1/1"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label class="form-label">前置脚本</label>
+                      <textarea
+                        v-model="editingCaseForm.pre_script"
+                        class="form-input w-full min-h-[120px] resize-y"
+                        placeholder="请输入 preScript 内容，留空则不写入"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label class="form-label">校验图片</label>
+                      <input
+                        v-model="editingCaseForm.verify_image"
+                        type="text"
+                        class="form-input w-full"
+                        placeholder="请输入校验图片名称或路径"
+                      >
+                    </div>
+                  </div>
+
+                  <div class="mt-6 flex justify-end gap-3">
+                    <button class="btn btn-secondary" @click="closeCaseEditModal" :disabled="savingCaseFields">
+                      取消
+                    </button>
+                    <button class="btn btn-primary" @click="saveCaseFields" :disabled="savingCaseFields">
+                      {{ savingCaseFields ? '保存中...' : '保存修改' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted, nextTick, reactive } from 'vue'
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 
 const selectedDevice = ref('')
@@ -503,6 +583,7 @@ const loadingFiles = ref(false)
 const loadingAnalysis = ref(false)
 const executingRows = ref({})
 const stopExecutionFlags = ref({})
+const executionAbortControllers = ref({})
 const selectedRows = ref([])
 const filterResult = ref('')
 const searchKeyword = ref('')
@@ -517,6 +598,7 @@ const modalResultTitle = ref('')
 const modalResultStatus = ref('')
 const modalResultScore = ref(null)
 const showVerifyImageModal = ref(false)
+const showCaseEditModal = ref(false)
 const verifyImageUrl = ref('')
 const verifyImagePreviewName = ref('')
 const verifyImageFolderInput = ref(null)
@@ -528,10 +610,180 @@ const currentPage = ref(1)
 const jumpPage = ref(1)
 const pageSize = ref(20)
 const isBatchExecuting = ref(false)
+const savingCaseFields = ref(false)
+const MAX_PERSISTED_EXECUTION_RESULTS = 200
+const EXCEL_EXECUTION_STORAGE_KEY = 'checkpilot.excelExecution.state'
+const editingCaseIndex = ref(null)
+const editingCaseExcelRow = ref(null)
+const editingCaseForm = reactive({
+  title: '',
+  ori_step: '',
+  pre_script: '',
+  verify_image: ''
+})
+let isRestoringExecutionState = false
 
 // 路由实例
 const router = useRouter()
 const route = useRoute()
+
+const readPersistedExecutionState = () => {
+  try {
+    const raw = localStorage.getItem(EXCEL_EXECUTION_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch (error) {
+    console.error('读取页面状态失败:', error)
+    return null
+  }
+}
+
+const persistExecutionState = () => {
+  if (isRestoringExecutionState) {
+    return
+  }
+
+  try {
+    localStorage.setItem(EXCEL_EXECUTION_STORAGE_KEY, JSON.stringify({
+      selectedDevice: selectedDevice.value || '',
+      selectedFile: selectedFile.value || '',
+      rowIndex: rowIndex.value,
+      filterResult: filterResult.value,
+      searchKeyword: searchKeyword.value,
+      currentPage: currentPage.value,
+      jumpPage: jumpPage.value,
+      pageSize: pageSize.value,
+      selectedRows: Array.isArray(selectedRows.value) ? selectedRows.value : [],
+      executionResults: executionResults.value.slice(-MAX_PERSISTED_EXECUTION_RESULTS),
+      rowScreenshots: rowScreenshots.value,
+      rowResultMeta: rowResultMeta.value,
+      verifyImageFolderName: verifyImageFolderName.value || '',
+      hadLocalVerifyImages: verifyImageFileCount.value > 0,
+    }))
+  } catch (error) {
+    console.error('保存页面状态失败:', error)
+  }
+}
+
+const applyRowResultMetaToAnalysis = () => {
+  if (!excelAnalysis.value?.valid_rows) {
+    return
+  }
+
+  Object.entries(rowResultMeta.value || {}).forEach(([rowIndexKey, meta]) => {
+    const numericIndex = Number(rowIndexKey)
+    const rowData = excelAnalysis.value?.valid_rows?.[numericIndex - 1]
+    if (rowData && meta?.verify_result) {
+      rowData.result = meta.verify_result
+    }
+  })
+}
+
+const restoreSavedDevice = async (savedDevice) => {
+  if (!savedDevice) {
+    return ''
+  }
+
+  try {
+    const listResponse = await fetch('/api/devices/list')
+    if (!listResponse.ok) {
+      return ''
+    }
+
+    const listData = await listResponse.json()
+    const devices = Array.isArray(listData.devices) ? listData.devices : []
+    const deviceIndex = devices.indexOf(savedDevice)
+    if (deviceIndex < 0) {
+      return ''
+    }
+
+    const selectResponse = await fetch('/api/devices/select', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ device_index: deviceIndex })
+    })
+
+    if (!selectResponse.ok) {
+      return ''
+    }
+
+    const selectData = await selectResponse.json()
+    return selectData.status === 'success' ? selectData.device || savedDevice : ''
+  } catch (error) {
+    console.error('恢复设备选择失败:', error)
+    return ''
+  }
+}
+
+const restoreExecutionState = async () => {
+  const savedState = readPersistedExecutionState()
+  if (!savedState) {
+    return
+  }
+
+  isRestoringExecutionState = true
+  try {
+    if (!selectedDevice.value && savedState.selectedDevice) {
+      const restoredDevice = await restoreSavedDevice(savedState.selectedDevice)
+      if (restoredDevice) {
+        selectedDevice.value = restoredDevice
+      }
+    }
+
+    if (savedState.selectedFile && excelFiles.value.includes(savedState.selectedFile)) {
+      selectedFile.value = savedState.selectedFile
+      await analyzeFile({ silent: true, resetView: false })
+    }
+
+    rowIndex.value = Number(savedState.rowIndex) || 1
+    filterResult.value = savedState.filterResult || ''
+    searchKeyword.value = savedState.searchKeyword || ''
+    currentPage.value = Number(savedState.currentPage) || 1
+    jumpPage.value = Number(savedState.jumpPage) || currentPage.value
+    pageSize.value = Number(savedState.pageSize) || 20
+    selectedRows.value = Array.isArray(savedState.selectedRows) ? savedState.selectedRows : []
+    executionResults.value = Array.isArray(savedState.executionResults) ? savedState.executionResults : []
+    rowScreenshots.value = savedState.rowScreenshots && typeof savedState.rowScreenshots === 'object' ? savedState.rowScreenshots : {}
+    rowResultMeta.value = savedState.rowResultMeta && typeof savedState.rowResultMeta === 'object' ? savedState.rowResultMeta : {}
+    applyRowResultMetaToAnalysis()
+
+    if (savedState.hadLocalVerifyImages && savedState.verifyImageFolderName) {
+      executionResults.value.push({
+        status: 'info',
+        message: `刷新后需重新选择本地校验图片文件夹：${savedState.verifyImageFolderName}`
+      })
+    }
+  } finally {
+    isRestoringExecutionState = false
+    persistExecutionState()
+  }
+}
+
+const clearExecutionAbortController = (index) => {
+  if (!executionAbortControllers.value[index]) {
+    return
+  }
+
+  delete executionAbortControllers.value[index]
+  executionAbortControllers.value = { ...executionAbortControllers.value }
+}
+
+const abortExecution = (index) => {
+  const controller = executionAbortControllers.value[index]
+  if (controller && !controller.signal.aborted) {
+    controller.abort()
+  }
+}
+
+const isAbortError = (error) => {
+  if (!error) {
+    return false
+  }
+
+  const message = String(error.message || error || '').toLowerCase()
+  return error.name === 'AbortError' || message.includes('abort') || message.includes('aborted')
+}
 
 // 导航守卫，处理页面离开时的确认
 
@@ -572,6 +824,9 @@ onBeforeRouteLeave((to, from, next) => {
 })
 
 onUnmounted(() => {
+  Object.keys(executionAbortControllers.value).forEach((key) => {
+    abortExecution(key)
+  })
   clearLocalVerifyImageCache()
 })
 
@@ -632,6 +887,7 @@ const executionLogStats = computed(() => {
 onMounted(async () => {
   await loadCurrentDevice()
   await loadExcelFiles()
+  await restoreExecutionState()
 })
 
 // 加载当前设备
@@ -639,7 +895,17 @@ const loadCurrentDevice = async () => {
   try {
     const response = await fetch('/api/devices/current')
     const data = await response.json()
-    selectedDevice.value = data.device
+    selectedDevice.value = data.device || ''
+
+    if (!selectedDevice.value) {
+      const savedState = readPersistedExecutionState()
+      if (savedState?.selectedDevice) {
+        const restoredDevice = await restoreSavedDevice(savedState.selectedDevice)
+        if (restoredDevice) {
+          selectedDevice.value = restoredDevice
+        }
+      }
+    }
   } catch (error) {
     console.error('获取当前设备失败:', error)
   }
@@ -659,6 +925,15 @@ const loadExcelFiles = async () => {
   }
 }
 
+const readErrorMessage = async (response, fallbackMessage) => {
+  try {
+    const data = await response.json()
+    return data.detail || data.message || fallbackMessage
+  } catch {
+    return fallbackMessage
+  }
+}
+
 // 选择文件
 const selectFile = (file) => {
   selectedFile.value = file
@@ -667,7 +942,78 @@ const selectFile = (file) => {
   executionResults.value = []
   rowScreenshots.value = {}
   rowResultMeta.value = {}
+  selectedRows.value = []
+  currentPage.value = 1
+  jumpPage.value = 1
   rowIndex.value = 1
+}
+
+const openCaseEditModal = (item) => {
+  editingCaseIndex.value = item.idx
+  editingCaseExcelRow.value = item.row.row
+  editingCaseForm.title = item.row.title || ''
+  editingCaseForm.ori_step = item.row.oriStep || item.row.step || ''
+  editingCaseForm.pre_script = item.row.preScript || ''
+  editingCaseForm.verify_image = item.row.verify_image || ''
+  showCaseEditModal.value = true
+}
+
+const closeCaseEditModal = () => {
+  showCaseEditModal.value = false
+  editingCaseIndex.value = null
+  editingCaseExcelRow.value = null
+  editingCaseForm.title = ''
+  editingCaseForm.ori_step = ''
+  editingCaseForm.pre_script = ''
+  editingCaseForm.verify_image = ''
+}
+
+const saveCaseFields = async () => {
+  if (!selectedFile.value || !editingCaseIndex.value || !editingCaseExcelRow.value) {
+    return
+  }
+
+  savingCaseFields.value = true
+  try {
+    const response = await fetch('/api/excel/update_case_fields', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        file_name: selectedFile.value,
+        excel_row: editingCaseExcelRow.value,
+        title: editingCaseForm.title,
+        ori_step: editingCaseForm.ori_step,
+        pre_script: editingCaseForm.pre_script,
+        step: editingCaseForm.ori_step,
+        verify_image: editingCaseForm.verify_image
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, '更新用例字段失败'))
+    }
+
+    const rowData = excelAnalysis.value?.valid_rows?.[editingCaseIndex.value - 1]
+    if (rowData) {
+      rowData.title = editingCaseForm.title
+      if (hasMeaningfulValue(rowData.oriStep) || hasMeaningfulValue(rowData.preScript) || Array.isArray(rowData.commands)) {
+        rowData.oriStep = editingCaseForm.ori_step
+        rowData.preScript = editingCaseForm.pre_script
+      } else {
+        rowData.step = editingCaseForm.ori_step
+      }
+      rowData.verify_image = editingCaseForm.verify_image
+    }
+
+    closeCaseEditModal()
+  } catch (error) {
+    console.error('更新用例字段失败:', error)
+    alert('更新用例字段失败: ' + error.message)
+  } finally {
+    savingCaseFields.value = false
+  }
 }
 
 const normalizeVerifyImageName = (imageName) => {
@@ -689,22 +1035,36 @@ const hasMeaningfulValue = (value) => {
 
 const getRowStepSegments = (row) => {
   const segments = []
-
-  ;['step', 'oriStep', 'preScript'].forEach((field) => {
-    const value = row?.[field]
-    if (hasMeaningfulValue(value)) {
-      segments.push(String(value).trim())
+  const seen = new Set()
+  const addSegment = (value) => {
+    if (!hasMeaningfulValue(value)) {
+      return
     }
-  })
 
-  if (Array.isArray(row?.command)) {
-    row.command.forEach((command) => {
-      if (hasMeaningfulValue(command)) {
-        segments.push(String(command).trim())
-      }
-    })
-  } else if (hasMeaningfulValue(row?.command)) {
-    segments.push(String(row.command).trim())
+    const normalized = String(value).trim()
+    if (!normalized || seen.has(normalized)) {
+      return
+    }
+
+    seen.add(normalized)
+    segments.push(normalized)
+  }
+
+  const hasSplitStepFields = hasMeaningfulValue(row?.oriStep) || hasMeaningfulValue(row?.preScript)
+  if (hasSplitStepFields) {
+    addSegment(row?.oriStep)
+    addSegment(row?.preScript)
+    return segments
+  }
+
+  addSegment(row?.step)
+
+  if (Array.isArray(row?.commands)) {
+    row.commands.forEach((command) => addSegment(command))
+  } else if (Array.isArray(row?.command)) {
+    row.command.forEach((command) => addSegment(command))
+  } else {
+    addSegment(row?.command)
   }
 
   return segments
@@ -849,9 +1209,12 @@ const handleVerifyImageFolderChange = (event) => {
 }
 
 // 分析文件
-const analyzeFile = async () => {
+const analyzeFile = async (options = {}) => {
+  const { silent = false, resetView = true } = options
   if (!selectedFile.value) {
-    alert('请先选择一个Excel文件')
+    if (!silent) {
+      alert('请先选择一个Excel文件')
+    }
     return
   }
   
@@ -865,7 +1228,7 @@ const analyzeFile = async () => {
     const validateData = await validateResponse.json()
     validationResult.value = validateData
 
-    if (!validateData.success) {
+    if (!validateData.success && !silent) {
       alert('文件验证发现问题，请查看下方的验证结果')
     }
     
@@ -876,14 +1239,19 @@ const analyzeFile = async () => {
 
     const data = await response.json()
     excelAnalysis.value = data
-    filterResult.value = ''
-    searchKeyword.value = ''
-    currentPage.value = 1
-    jumpPage.value = 1
-    selectedRows.value = []
+    if (resetView) {
+      filterResult.value = ''
+      searchKeyword.value = ''
+      currentPage.value = 1
+      jumpPage.value = 1
+      selectedRows.value = []
+    }
+    applyRowResultMetaToAnalysis()
   } catch (error) {
     console.error('分析文件失败:', error)
-    alert('分析文件失败: ' + error.message)
+    if (!silent) {
+      alert('分析文件失败: ' + error.message)
+    }
   } finally {
     loadingAnalysis.value = false
   }
@@ -943,8 +1311,29 @@ const executeExcelRowByIndex = (index) => {
 
     executingRows.value[index] = true
     stopExecutionFlags.value[index] = false
+    const abortController = new AbortController()
+    executionAbortControllers.value[index] = abortController
     if (!isBatchExecuting.value) {
       executionResults.value = []
+    }
+
+    let stopReported = false
+    const reportStopped = () => {
+      if (stopReported) {
+        return
+      }
+
+      stopReported = true
+      executionResults.value.push({
+        status: 'info',
+        message: '执行已停止'
+      })
+    }
+
+    const finishExecution = () => {
+      executingRows.value[index] = false
+      clearExecutionAbortController(index)
+      resolve()
     }
 
     buildExecutionPayload(index)
@@ -953,6 +1342,7 @@ const executeExcelRowByIndex = (index) => {
         headers: {
           'Content-Type': 'application/json'
         },
+        signal: abortController.signal,
         body: JSON.stringify(payload)
       }))
       .then(response => {
@@ -965,21 +1355,15 @@ const executeExcelRowByIndex = (index) => {
         let buffer = ''
 
         const readChunk = () => {
-          if (stopExecutionFlags.value[index]) {
-            reader.cancel()
-            executingRows.value[index] = false
-            executionResults.value.push({
-              status: 'error',
-              message: '执行已停止'
-            })
-            resolve()
+          if (abortController.signal.aborted || stopExecutionFlags.value[index]) {
+            reportStopped()
+            finishExecution()
             return
           }
 
           reader.read().then(({ done, value }) => {
             if (done) {
-              executingRows.value[index] = false
-              resolve()
+              finishExecution()
               return
             }
 
@@ -1017,31 +1401,42 @@ const executeExcelRowByIndex = (index) => {
             readChunk()
           })
             .catch(error => {
+              if (abortController.signal.aborted || stopExecutionFlags.value[index] || isAbortError(error)) {
+                reportStopped()
+                finishExecution()
+                return
+              }
+
               console.error('读取流失败:', error)
               executionResults.value.push({
                 status: 'error',
                 message: '执行命令失败：' + error.message
               })
-              executingRows.value[index] = false
-              resolve()
+              finishExecution()
             })
         }
 
         readChunk()
       })
       .catch(error => {
+        if (abortController.signal.aborted || stopExecutionFlags.value[index] || isAbortError(error)) {
+          reportStopped()
+          finishExecution()
+          return
+        }
+
         console.error('执行命令失败:', error)
         executionResults.value = [
           { status: 'error', message: '执行命令失败：' + error.message }
         ]
-        executingRows.value[index] = false
-        resolve()
+        finishExecution()
       })
   })
 }
 // 停止执行
 const stopExecution = (index) => {
   stopExecutionFlags.value[index] = true
+  abortExecution(index)
 }
 
 // 显示执行结果
@@ -1134,6 +1529,7 @@ const stopAllExecution = () => {
   for (const rowIndex in executingRows.value) {
     if (executingRows.value[rowIndex]) {
       stopExecutionFlags.value[rowIndex] = true
+      abortExecution(rowIndex)
     }
   }
   
@@ -1200,6 +1596,14 @@ watch(currentPage, (newPage) => {
   jumpPage.value = newPage
 })
 
+watch(
+  [selectedDevice, selectedFile, rowIndex, filterResult, searchKeyword, currentPage, jumpPage, pageSize, selectedRows, executionResults, rowScreenshots, rowResultMeta],
+  () => {
+    persistExecutionState()
+  },
+  { deep: true }
+)
+
 // 上传文件
 const fileInput = ref(null)
 const uploadFile = async (event) => {
@@ -1262,7 +1666,11 @@ const deleteFile = async (file) => {
       if (selectedFile.value === file) {
         selectedFile.value = ''
         excelAnalysis.value = null
+        validationResult.value = null
         executionResults.value = []
+        rowScreenshots.value = {}
+        rowResultMeta.value = {}
+        selectedRows.value = []
       }
     } catch (error) {
       console.error('删除文件失败:', error)
@@ -1273,3 +1681,47 @@ const deleteFile = async (file) => {
   }
 }
 </script>
+
+<style scoped>
+.excel-execution-page {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px 28px;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.excel-execution-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.9) rgba(226, 232, 240, 0.72);
+}
+
+.excel-execution-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.excel-execution-scroll::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.72);
+}
+
+.excel-execution-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.9);
+  background-clip: padding-box;
+}
+</style>

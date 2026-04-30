@@ -11,6 +11,7 @@ VALID_KEYS = {
     "DIGITAL8", "DIGITAL9", "DIGITAL0", "LIBRARY", "TV_AV", "VOLUMEUP",
     "VOLUMEDOWN", "NETFLIX", "YOUTUBE", "PRIME_VIDEO", "ACTION3", "APPS", "FILES", "MUTE","DISCOVERY"
 }
+ASR_META_COMMANDS = {"TTS"}
 
 class ExcelValidator:
     """Excel文件验证器"""
@@ -49,13 +50,17 @@ class ExcelValidator:
 
                 commands = [cmd.strip() for cmd in cell_value.split(",") if cmd.strip()]
                 for cmd in commands:
+                    if cmd.upper() in ASR_META_COMMANDS:
+                        continue
+
                     parts = cmd.split("/")
                     if len(parts) != 3:
                         errors.append(f"{col}{row} 命令 '{cmd}' 格式应为 KEY/COUNT/TIME")
                         continue
 
                     key, count, time_val = parts
-                    if key not in VALID_KEYS:
+                    key = key.upper()
+                    if key not in VALID_KEYS and key not in ASR_META_COMMANDS:
                         errors.append(f"{col}{row} 按键名称 '{key}' 无效")
 
                     if not count.isdigit() or int(count) <= 0:

@@ -6,10 +6,10 @@ from ..models.schemas import (
     ExcelExecuteRequest,
     AppendSequenceRequest,
     WriteCellRequest,
+    ExcelCaseFieldsUpdateRequest,
     ExcelValidationResult,
     ExcelAnalysisResult
 )
-from ..runtime import get_current_device, get_monitor_live_sequence
 from ..services.excel_service import excel_service
 from ..utils.path_resolver import get_excel_dir, resolve_excel_file, resolve_image_file
 
@@ -101,21 +101,42 @@ async def write_cell(req: WriteCellRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
 
+@router.post("/update_case_fields")
+async def update_case_fields(req: ExcelCaseFieldsUpdateRequest):
+    """更新图片校验执行页中的标题、步骤和校验图片。"""
+    try:
+        result = excel_service.update_case_fields(
+            req.file_name,
+            req.excel_row,
+            req.title,
+            req.ori_step,
+            req.pre_script,
+            req.verify_image,
+            req.step,
+        )
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新用例字段失败: {str(e)}")
+
 @router.post("/append_sequence")
 async def append_sequence(req: AppendSequenceRequest):
-    """追加序列到Excel"""
-    current_device = get_current_device()
-    if not current_device:
-        raise HTTPException(status_code=400, detail="请先选择设备")
-
-    monitor_live_sequence = get_monitor_live_sequence()
+    """将序列写入 preScript 列中最后一个仍为空的有效数据行。"""
     try:
-        df = excel_service.analyze(req.file_name)
-        last_row = len(df.get('valid_rows', []))
-        excel_service.write_cell(req.file_name, 'sequence', last_row + 1, req.sequence)
-        return {"status": "ok", "message": "序列已追加"}
+        result = excel_service.append_sequence_to_latest_prescript(req.file_name, req.sequence)
+        return {
+            **result,
+            "message": f"序列已写入第 {result['excel_row']} 行的 preScript",
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"追加失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"写入 preScript 失败: {str(e)}")
 
 @router.get("/verify_image")
 async def verify_image(file_name: str = Query(...), image_name: str = Query(...)):

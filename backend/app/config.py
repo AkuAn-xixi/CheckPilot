@@ -27,7 +27,9 @@ class Settings:
     WORKING_DIR: Path = _get_runtime_dir()
     SCREENSHOT_DIR: Path = WORKING_DIR / "screenshots"
     TEST_CASES_DIR: Path = WORKING_DIR / "test_cases"
+    ASR_MODELS_DIR: Path = WORKING_DIR / "asr_models"
     ADB_TIMEOUT: int = 30
+    CUSTOMIZATION_FILE: Path = WORKING_DIR / "customization.json"
 
     @property
     def FRONTEND_DIST_DIR(self) -> Path:
@@ -44,6 +46,7 @@ class Settings:
     def ensure_runtime_dirs(self) -> None:
         self.WORKING_DIR.mkdir(parents=True, exist_ok=True)
         self.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        self.ASR_MODELS_DIR.mkdir(parents=True, exist_ok=True)
         (self.TEST_CASES_DIR / "excel").mkdir(parents=True, exist_ok=True)
         (self.TEST_CASES_DIR / "images").mkdir(parents=True, exist_ok=True)
 

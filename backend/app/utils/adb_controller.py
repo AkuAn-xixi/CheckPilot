@@ -3,6 +3,7 @@ import subprocess
 import time
 import os
 import re
+import json
 import pandas as pd
 from typing import List, Optional, Dict, Any
 from ..config import settings
@@ -52,6 +53,31 @@ KEYCODE_MAP = {
     "INFORMATION": 7,
     "MUTE": 164
 }
+
+
+def get_keycode_map() -> dict:
+    """返回合并后的键值映射：KEYCODE_MAP 默认值 + 当前激活方案的 key_codes 覆盖。"""
+    merged = dict(KEYCODE_MAP)
+    try:
+        path = settings.CUSTOMIZATION_FILE
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # 同时兼容旧扁平格式和新方案格式
+            if "schemes" in data:
+                active = data.get("active_scheme", "默认")
+                scheme = data.get("schemes", {}).get(active, {})
+                custom = scheme.get("key_codes", {})
+            else:
+                custom = data.get("key_codes", {})
+            if isinstance(custom, dict):
+                for k, v in custom.items():
+                    if isinstance(k, str) and k.strip() and isinstance(v, int):
+                        merged[k.strip().upper()] = v
+    except Exception:
+        pass
+    return merged
+
 
 class ADBController:
     """ADB设备控制器"""
@@ -112,6 +138,7 @@ class ADBController:
 
     def execute_commands(self, command_sequence: str) -> List[Dict[str, Any]]:
         """执行多条ADB命令"""
+        keycode_map = get_keycode_map()
         commands = command_sequence.split(',')
         results = []
 
@@ -127,11 +154,11 @@ class ADBController:
                 repeat = int(repeat)
                 delay = float(delay)
 
-                if keyname not in KEYCODE_MAP:
+                if keyname not in keycode_map:
                     results.append({"status": "error", "message": f"未知按键: {keyname}"})
                     continue
 
-                keycode = KEYCODE_MAP[keyname]
+                keycode = keycode_map[keyname]
                 for _ in range(repeat):
                     success = self.send_keyevent(keycode, keyname, delay)
                     if success:
@@ -150,6 +177,34 @@ class ADBController:
             command.extend(["-s", self.device_serial])
         command.extend(args)
         return command
+
+    def get_last_tts_text(self, tail_count: int = 200) -> Optional[str]:
+        """从最近的 logcat 输出中提取最后一条 tts aric char 文本。"""
+        try:
+            result = subprocess.run(
+                self._adb_command("logcat", "-d", "-t", str(max(1, int(tail_count)))),
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except (subprocess.CalledProcessError, OSError, ValueError) as e:
+            print(f"读取 TTS logcat 失败: {e}")
+            return None
+
+        matches = re.findall(r'tts aric char\s*=\s*"([^"]*)"', result.stdout, flags=re.IGNORECASE)
+        if matches:
+            return matches[-1].strip()
+
+        lines = [line.strip() for line in result.stdout.splitlines() if "tts aric char" in line.lower()]
+        if not lines:
+            return None
+
+        last_line = lines[-1]
+        if "=" in last_line:
+            return last_line.split("=", 1)[1].strip().strip('"')
+        return last_line
 
     def _remove_local_file(self, file_path) -> None:
         try:
@@ -263,6 +318,7 @@ class ADBController:
 
     def read_excel_commands(self, excel_path: str, target_row: Optional[int] = None) -> Dict[str, Any]:
         """读取Excel文件中的命令"""
+        keycode_map = get_keycode_map()
         try:
             df = pd.read_excel(excel_path)
 
@@ -313,7 +369,7 @@ class ADBController:
                                 repeat = int(parts[1])
                                 delay = float(parts[2])
 
-                                if keyname in KEYCODE_MAP:
+                                if keyname in keycode_map:
                                     has_valid_command = True
                         except ValueError:
                             pass
@@ -376,7 +432,7 @@ class ADBController:
                             skipped_rows.append({"row": index+2, "reason": "delay值不能小于0"})
                             continue
 
-                        if keyname not in KEYCODE_MAP:
+                        if keyname not in keycode_map:
                             skipped_rows.append({"row": index+2, "reason": f"keyname '{keyname}' 不存在于按键映射表中"})
                             continue
 

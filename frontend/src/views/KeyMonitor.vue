@@ -9,6 +9,14 @@
     </div>
     <div v-else>
       <div class="bg-white border rounded-lg p-4 mb-4 w-full max-w-screen-lg mx-auto">
+        <input
+          id="keymonitor-excel-upload"
+          ref="excelUploadInput"
+          type="file"
+          class="hidden"
+          accept=".xlsx,.xls"
+          @change="uploadExcelFile"
+        >
         <div class="flex flex-wrap gap-3 mb-3">
           <button 
             v-if="!keyMonitorActive"
@@ -33,6 +41,49 @@
             复制序列
           </button>
         </div>
+        <div class="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <div class="text-sm font-medium text-gray-700">Excel 文件</div>
+            <button class="btn btn-secondary btn-sm" @click="loadExcelFiles" :disabled="excelLoadingFiles || excelUploading">
+              {{ excelLoadingFiles ? '刷新中…' : '刷新文件列表' }}
+            </button>
+            <label for="keymonitor-excel-upload" class="btn btn-secondary btn-sm cursor-pointer" :class="{ 'opacity-60 pointer-events-none': excelUploading }">
+              {{ excelUploading ? '上传中…' : '上传 Excel' }}
+            </label>
+          </div>
+          <div class="grid gap-3">
+            <select
+              v-model="selectedExcelFile"
+              class="form-select"
+              :disabled="excelLoadingFiles || excelUploading"
+              @change="handleExcelFileChange"
+            >
+              <option value="">选择 Excel 文件</option>
+              <option v-for="file in excelFiles" :key="file" :value="file">{{ file }}</option>
+            </select>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              class="btn btn-secondary btn-sm"
+              @click="saveSequenceToExcel"
+              :disabled="!selectedExcelFile || !workingSequence || keyMonitorActive || isStarting || excelLoadingRows || excelUploading || excelSavingSequence"
+            >
+              {{ excelSavingSequence ? '写入中…' : '写入 preScript 最新空白行' }}
+            </button>
+          </div>
+          <div class="text-sm text-gray-500 mt-2">
+            可选择 Excel 文件，并将当前监听/编辑后的序列写回到 preScript 最新空白行。
+          </div>
+          <div v-if="selectedExcelFile && !excelLoadingRows && excelRows.length === 0" class="mt-2 text-sm text-gray-500">
+            该文件当前未解析出可用命令行，但仍可将当前序列写入 preScript 最新空白行。
+          </div>
+          <div v-if="excelImportError" class="text-sm text-danger mt-2">
+            {{ excelImportError }}
+          </div>
+          <div v-else-if="excelImportMessage" class="text-sm text-green-600 mt-2">
+            {{ excelImportMessage }}
+          </div>
+        </div>
         <div v-if="keyMonitorActive || isStarting" class="border rounded p-3 bg-gray-50 min-h-[120px] font-mono text-sm whitespace-pre-wrap w-full overflow-auto">
           <template v-if="displayParts.length > 0">
             <template v-for="(part, idx) in displayParts" :key="idx">
@@ -43,7 +94,7 @@
                   <span v-if="sIdx < 2">/</span>
                 </template>
               </span>
-              <span v-if="idx < displayParts.length - 1">, </span>
+              <span v-if="idx < displayParts.length - 1">,</span>
             </template>
           </template>
           <template v-else>
@@ -68,10 +119,16 @@
             本次结果仍可直接在上方文本框手改。如果你已经确认某个错误指令对应哪个正确按键，请先把规则保存在这里；保存后，下次监听会直接输出修正后的指令。
           </div>
           <div class="flex flex-wrap gap-2 items-center mt-2">
-            <select v-model="replaceSourceKey" class="form-select min-w-[180px]">
-              <option value="" disabled>选择错误指令</option>
-              <option v-for="cmd in detectedInvalidCommands" :key="cmd" :value="cmd">{{ cmd }}</option>
-            </select>
+            <input
+              v-model="replaceSourceKey"
+              type="text"
+              list="monitor-source-commands"
+              class="form-input min-w-[180px]"
+              placeholder="输入或选择待纠正指令，如 LIBRARY"
+            >
+            <datalist id="monitor-source-commands">
+              <option v-for="cmd in correctionSourceOptions" :key="cmd" :value="cmd"></option>
+            </datalist>
             <input
               v-model="replaceTargetKey"
               type="text"
@@ -90,7 +147,7 @@
             </button>
           </div>
           <div v-if="detectedInvalidCommands.length > 0" class="text-sm text-yellow-700 mt-2">
-            本次监听检测到疑似错误指令：{{ detectedInvalidCommands.join(', ') }}
+            本次监听检测到疑似错误指令：{{ detectedInvalidCommands.join(',') }}
           </div>
           <div v-else class="text-sm text-gray-600 mt-2">
             本次监听没有发现新的未知指令。你也可以直接维护下面已保存的纠正规则。
@@ -146,6 +203,15 @@ const savedMappings = ref({})
 const savingMapping = ref(false)
 const mappingError = ref('')
 const validMonitorTargets = ref(defaultValidMonitorKeys)
+const excelFiles = ref([])
+const selectedExcelFile = ref('')
+const excelRows = ref([])
+const excelLoadingFiles = ref(false)
+const excelLoadingRows = ref(false)
+const excelUploading = ref(false)
+const excelSavingSequence = ref(false)
+const excelImportError = ref('')
+const excelImportMessage = ref('')
 const displayParts = computed(() => {
   const s = keyMonitorSequence.value || ''
   return s.split(',').map(i => i.trim()).filter(Boolean)
@@ -159,12 +225,13 @@ const detectedInvalidCommands = computed(() => {
   if (keyMonitorActive.value || isStarting.value) {
     return []
   }
+  const validTargetSet = new Set(validMonitorTargets.value.map(key => String(key).trim().toUpperCase()))
   const parts = (keyMonitorSequence.value || '').split(',').map(item => item.trim()).filter(Boolean)
   const invalid = new Set()
   for (const part of parts) {
     const [key] = part.split('/')
     const normalizedKey = (key || '').trim().toUpperCase()
-    if (normalizedKey && !VALID_MONITOR_KEYS.has(normalizedKey)) {
+    if (normalizedKey && !validTargetSet.has(normalizedKey)) {
       invalid.add(normalizedKey)
     }
   }
@@ -175,8 +242,54 @@ const savedMappingsList = computed(() => {
     .map(([source, target]) => ({ source, target }))
     .sort((left, right) => left.source.localeCompare(right.source))
 })
-const validMonitorTargetSet = computed(() => new Set(validMonitorTargets.value))
+const correctionSourceOptions = computed(() => {
+  const commands = new Set()
+  const normalized = normalizeCommandSequence(workingSequence.value)
+
+  normalized
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .forEach((part) => {
+      const [key] = part.split('/')
+      const normalizedKey = (key || '').trim().toUpperCase()
+      if (normalizedKey) {
+        commands.add(normalizedKey)
+      }
+    })
+
+  Object.keys(savedMappings.value || {}).forEach((key) => {
+    const normalizedKey = String(key || '').trim().toUpperCase()
+    if (normalizedKey) {
+      commands.add(normalizedKey)
+    }
+  })
+
+  return Array.from(commands).sort()
+})
 const splitPart = (p) => p.split('/')
+
+function hasMeaningfulValue(value) {
+  if (value === null || value === undefined) {
+    return false
+  }
+
+  const normalized = String(value).trim()
+  return normalized !== '' && normalized.toLowerCase() !== 'nan'
+}
+
+function normalizeCommandSequence(sequence) {
+  return String(sequence || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(',')
+}
+
+const clearExcelImportStatus = () => {
+  excelImportError.value = ''
+  excelImportMessage.value = ''
+}
 
 const replaceCommandInSequence = (sequence, sourceKey, targetKey) => {
   const normalizedSource = (sourceKey || '').trim().toUpperCase()
@@ -198,11 +311,38 @@ const replaceCommandInSequence = (sequence, sourceKey, targetKey) => {
       }
       return `${normalizedTarget}/${segments[1]}/${segments[2]}`
     })
-    .join(', ')
+    .join(',')
 }
 
-const syncCapturedSequence = (sequence) => {
-  const normalized = sequence || ''
+const applyCorrectionMappingsToSequence = (sequence, mappings = savedMappings.value) => {
+  const normalized = normalizeCommandSequence(sequence)
+  if (!normalized || !mappings || typeof mappings !== 'object') {
+    return normalized
+  }
+
+  return normalized
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const segments = part.split('/')
+      if (segments.length < 3) {
+        return part
+      }
+
+      const sourceKey = (segments[0] || '').trim().toUpperCase()
+      const mappedKey = mappings[sourceKey]
+      if (typeof mappedKey !== 'string' || !mappedKey.trim()) {
+        return part
+      }
+
+      return `${mappedKey.trim().toUpperCase()}/${segments[1]}/${segments[2]}`
+    })
+    .join(',')
+}
+
+const syncCapturedSequence = (sequence, mappings = savedMappings.value) => {
+  const normalized = applyCorrectionMappingsToSequence(sequence, mappings)
   keyMonitorSequence.value = normalized
   editableSequence.value = normalized
   sequenceDirty.value = false
@@ -213,6 +353,7 @@ const syncCapturedSequence = (sequence) => {
 onMounted(async () => {
   await loadCurrentDevice()
   await loadCorrectionRules()
+  await loadExcelFiles()
   startStatusPolling()
 })
 
@@ -231,6 +372,100 @@ const loadCurrentDevice = async () => {
   } catch {}
 }
 
+const loadExcelFiles = async () => {
+  excelLoadingFiles.value = true
+  clearExcelImportStatus()
+  try {
+    const response = await fetch('/api/excel/files')
+    if (!response.ok) {
+      throw new Error('加载 Excel 文件列表失败')
+    }
+    const data = await response.json()
+    excelFiles.value = Array.isArray(data.files) ? data.files : []
+
+    if (selectedExcelFile.value && !excelFiles.value.includes(selectedExcelFile.value)) {
+      selectedExcelFile.value = ''
+      excelRows.value = []
+    }
+  } catch (error) {
+    excelImportError.value = error.message || '加载 Excel 文件列表失败'
+  } finally {
+    excelLoadingFiles.value = false
+  }
+}
+
+const analyzeSelectedExcel = async () => {
+  if (!selectedExcelFile.value) {
+    excelRows.value = []
+    return
+  }
+
+  excelLoadingRows.value = true
+  clearExcelImportStatus()
+  try {
+    const response = await fetch(`/api/excel/analyze?file_name=${encodeURIComponent(selectedExcelFile.value)}`)
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.detail || '读取 Excel 内容失败')
+    }
+
+    const data = await response.json()
+    excelRows.value = Array.isArray(data.valid_rows) ? data.valid_rows : []
+
+    if (excelRows.value.length === 0) {
+      excelImportError.value = '该 Excel 文件未解析出有效命令行'
+      return
+    }
+  } catch (error) {
+    excelRows.value = []
+    excelImportError.value = error.message || '读取 Excel 内容失败'
+  } finally {
+    excelLoadingRows.value = false
+  }
+}
+
+const handleExcelFileChange = async () => {
+  excelRows.value = []
+  clearExcelImportStatus()
+  await analyzeSelectedExcel()
+}
+
+const uploadExcelFile = async (event) => {
+  const file = event.target?.files?.[0]
+  if (!file) {
+    return
+  }
+
+  excelUploading.value = true
+  clearExcelImportStatus()
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch('/api/excel/upload', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(data.detail || '上传 Excel 文件失败')
+    }
+
+    excelImportMessage.value = data.message || 'Excel 文件上传成功'
+    await loadExcelFiles()
+    selectedExcelFile.value = data.filename || file.name
+    await analyzeSelectedExcel()
+  } catch (error) {
+    excelImportError.value = error.message || '上传 Excel 文件失败'
+  } finally {
+    if (event.target) {
+      event.target.value = ''
+    }
+    excelUploading.value = false
+  }
+}
+
 const startStatusPolling = () => {
   statusTimer = setInterval(async () => {
     try {
@@ -242,9 +477,9 @@ const startStatusPolling = () => {
           isStarting.value = false
           syncCapturedSequence(data.live_sequence || '')
         } else {
-          keyMonitorSequence.value = data.latest_sequence || ''
+          keyMonitorSequence.value = applyCorrectionMappingsToSequence(data.latest_sequence || '')
           if (!isStarting.value && !sequenceDirty.value) {
-            editableSequence.value = data.latest_sequence || ''
+            editableSequence.value = applyCorrectionMappingsToSequence(data.latest_sequence || '')
           }
         }
         keyMonitorError.value = data.last_error || ''
@@ -285,10 +520,14 @@ const loadCorrectionRules = async () => {
       throw new Error('加载纠正规则失败')
     }
     const data = await res.json()
-    savedMappings.value = data.mappings || {}
+    const mappings = data.mappings || {}
+    savedMappings.value = mappings
     validMonitorTargets.value = (data.valid_targets && data.valid_targets.length > 0)
       ? data.valid_targets
       : defaultValidMonitorKeys
+    keyMonitorSequence.value = applyCorrectionMappingsToSequence(keyMonitorSequence.value, mappings)
+    editableSequence.value = applyCorrectionMappingsToSequence(editableSequence.value, mappings)
+    sequenceDirty.value = editableSequence.value !== keyMonitorSequence.value
     mappingError.value = ''
   } catch (error) {
     mappingError.value = error.message || '加载纠正规则失败'
@@ -341,15 +580,48 @@ const restoreCapturedSequence = () => {
   replaceTargetKey.value = ''
 }
 
+const saveSequenceToExcel = async () => {
+  const sequence = normalizeCommandSequence(workingSequence.value)
+  if (!selectedExcelFile.value) {
+    excelImportError.value = '请先选择 Excel 文件'
+    return
+  }
+  if (!sequence) {
+    excelImportError.value = '当前没有可写入的命令序列'
+    return
+  }
+
+  excelSavingSequence.value = true
+  clearExcelImportStatus()
+  try {
+    const response = await fetch('/api/excel/append_sequence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_name: selectedExcelFile.value, sequence })
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(data.detail || '写入 preScript 失败')
+    }
+
+    if (selectedExcelFile.value) {
+      await analyzeSelectedExcel()
+    }
+
+    excelImportError.value = ''
+    excelImportMessage.value = data.message || `已写入 ${selectedExcelFile.value} 的 preScript`
+  } catch (error) {
+    excelImportError.value = error.message || '写入 preScript 失败'
+  } finally {
+    excelSavingSequence.value = false
+  }
+}
+
 const saveCorrectionRule = async () => {
   const sourceKey = replaceSourceKey.value.trim().toUpperCase()
   const targetKey = replaceTargetKey.value.trim().toUpperCase()
   if (!sourceKey || !targetKey) {
-    return
-  }
-
-  if (!validMonitorTargetSet.value.has(targetKey)) {
-    mappingError.value = `不支持保存为指令：${targetKey}`
     return
   }
 
@@ -366,6 +638,9 @@ const saveCorrectionRule = async () => {
     }
 
     savedMappings.value = data.mappings || {}
+    validMonitorTargets.value = (data.valid_targets && data.valid_targets.length > 0)
+      ? data.valid_targets
+      : defaultValidMonitorKeys
     keyMonitorSequence.value = data.latest_sequence || replaceCommandInSequence(keyMonitorSequence.value, sourceKey, targetKey)
     editableSequence.value = replaceCommandInSequence(editableSequence.value, sourceKey, targetKey)
     sequenceDirty.value = editableSequence.value !== keyMonitorSequence.value
@@ -420,7 +695,7 @@ function compressAdjacent(seq) {
     }
     out.push(`${key}/${cnt}/${delay}`)
   }
-  return out.join(', ')
+  return out.join(',')
 }
 </script>
 

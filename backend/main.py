@@ -14,8 +14,9 @@ import json
 from pathlib import Path
 
 from .app.config import settings
-from .app.api import devices_router, excel_router, execution_router
-from .app.utils.adb_controller import ADBController, KEYCODE_MAP
+from .app.api import asr_router, customization_router, devices_router, excel_router, execution_router
+from .app.utils.adb_controller import ADBController, KEYCODE_MAP, get_keycode_map
+from .FieldValidation import get_valid_keys as get_runtime_valid_keys
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -34,10 +35,24 @@ app.add_middleware(
 app.include_router(devices_router)
 app.include_router(excel_router)
 app.include_router(execution_router)
+app.include_router(asr_router)
+app.include_router(customization_router)
 
 controller = ADBController()
 
-MONITOR_MAPPING_FILE = settings.WORKING_DIR / "monitor_key_mappings.json"
+
+def resolve_monitor_mapping_file() -> Path:
+    candidates = [
+        settings.WORKING_DIR / "monitor_key_mappings.json",
+        settings.WORKING_DIR / "backend" / "monitor_key_mappings.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+MONITOR_MAPPING_FILE = resolve_monitor_mapping_file()
 
 current_device = None
 monitor_active = False
@@ -90,7 +105,7 @@ def format_monitor_sequence(sequence: str) -> str:
     if not sequence:
         return ''
     parts = [line.strip() for line in sequence.splitlines() if line.strip()]
-    return ', '.join(parts)
+    return ','.join(parts)
 
 
 def normalize_monitor_key(key: str) -> str:
@@ -109,7 +124,7 @@ def load_monitor_mappings() -> dict[str, str]:
         for source_key, target_key in data.items():
             source = normalize_monitor_key(source_key)
             target = normalize_monitor_key(target_key)
-            if source and target and target in KEYCODE_MAP and target not in {"SRTTING", "PRIME_VII", "ACTIONS"}:
+            if source and target:
                 normalized[source] = target
         return normalized
     except Exception:
@@ -120,6 +135,31 @@ def save_monitor_mappings(mappings: dict[str, str]) -> None:
     MONITOR_MAPPING_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(MONITOR_MAPPING_FILE, 'w', encoding='utf-8') as fp:
         json.dump(dict(sorted(mappings.items())), fp, ensure_ascii=True, indent=2)
+
+
+def get_monitor_valid_targets() -> list[str]:
+    excluded = {"SRTTING", "PRIME_VII", "ACTIONS"}
+    targets: set[str] = set()
+
+    for key in get_keycode_map().keys():
+        normalized = normalize_monitor_key(key)
+        if normalized and normalized not in excluded:
+            targets.add(normalized)
+
+    try:
+        for key in get_runtime_valid_keys():
+            normalized = normalize_monitor_key(key)
+            if normalized and normalized not in excluded:
+                targets.add(normalized)
+    except Exception:
+        pass
+
+    for target in MONITOR_USER_MAPPING.values():
+        normalized = normalize_monitor_key(target)
+        if normalized and normalized not in excluded:
+            targets.add(normalized)
+
+    return sorted(targets)
 
 
 def replace_monitor_keys_in_sequence(sequence: str, replacements: dict[str, str]) -> str:
@@ -168,6 +208,8 @@ KEY_CUSTOM_MAPPING = {
 
 def resolve_monitored_key(raw_key: str) -> str:
     normalized_key = normalize_monitor_key(raw_key)
+    if normalized_key in MONITOR_USER_MAPPING:
+        return MONITOR_USER_MAPPING[normalized_key]
     mapped_key = KEY_CUSTOM_MAPPING.get(normalized_key, normalized_key)
     return MONITOR_USER_MAPPING.get(mapped_key, mapped_key)
 
@@ -402,7 +444,7 @@ async def stop_keymonitor():
 async def get_keymonitor_mappings():
     return {
         "mappings": dict(sorted(MONITOR_USER_MAPPING.items())),
-        "valid_targets": sorted(key for key in KEYCODE_MAP.keys() if key not in {"SRTTING", "PRIME_VII", "ACTIONS"})
+        "valid_targets": get_monitor_valid_targets(),
     }
 
 
@@ -415,8 +457,6 @@ async def save_keymonitor_mapping(payload: KeyMonitorMappingRequest):
         return {"success": False, "message": "错误指令不能为空"}
     if not target_key:
         return {"success": False, "message": "正确指令不能为空"}
-    if target_key not in KEYCODE_MAP or target_key in {"SRTTING", "PRIME_VII", "ACTIONS"}:
-        return {"success": False, "message": f"不支持保存为指令: {target_key}"}
 
     MONITOR_USER_MAPPING[source_key] = target_key
     save_monitor_mappings(MONITOR_USER_MAPPING)
@@ -424,6 +464,7 @@ async def save_keymonitor_mapping(payload: KeyMonitorMappingRequest):
     return {
         "success": True,
         "mappings": dict(sorted(MONITOR_USER_MAPPING.items())),
+        "valid_targets": get_monitor_valid_targets(),
         "latest_sequence": format_monitor_sequence(monitor_dataset_latest),
         "live_sequence": format_monitor_sequence(monitor_live_sequence)
     }

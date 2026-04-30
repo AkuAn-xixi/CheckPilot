@@ -1,7 +1,10 @@
 {
-  "0325": "LIBRARY",
+  "00FC": "SOURCE",
+  "0325": "DISCOVERY",
   "0326": "FILES",
   "0327": "APPS",
+  "033C": "WHALETV",
   "KPSLASH": "YOUTUBE",
+  "LIBRARY": "DISCOVERY",
   "RIGHTCTRL": "NETFLIX"
 }

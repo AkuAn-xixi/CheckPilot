@@ -1,6 +1,11 @@
 <template>
-  <div class="card">
-    <h2 class="mb-4">命令执行</h2>
+  <div class="card command-page">
+    <div class="command-page-header">
+      <div>
+        <h2 class="mb-2">命令执行</h2>
+        <p class="command-page-subtitle">直接发送 ADB 指令序列，命令说明和示例固定放在右侧，减少整页纵向占用。</p>
+      </div>
+    </div>
     
     <div v-if="!selectedDevice" class="bg-yellow-50 p-4 rounded-lg mb-6">
       <p class="text-warning mb-2">请先在设备管理页面选择一个ADB设备</p>
@@ -9,20 +14,50 @@
       </router-link>
     </div>
     
-    <div v-else>
-      <div class="mb-6">
-        <div class="form-group">
+    <div v-else class="command-layout">
+      <section class="command-main">
+        <div class="form-group mb-0">
           <label class="form-label" for="commandInput">命令序列</label>
           <textarea 
             id="commandInput" 
             v-model="commandInput" 
-            class="form-input" 
-            rows="5"
+            class="form-input command-input" 
+            rows="4"
             placeholder="输入命令序列，格式为：KEYNAME/REPEAT/DELAY,KEYNAME/REPEAT/DELAY\n例如：OK/1/1,DOWN/1/1,UP/2/0.5"
           ></textarea>
         </div>
-        
-        <div class="bg-gray-50 p-4 rounded-lg mb-4">
+
+        <div class="command-actions">
+          <button 
+            @click="executeCommands" 
+            class="btn btn-primary"
+            :disabled="!commandInput.trim() || executing"
+          >
+            {{ executing ? '执行中...' : '执行命令' }}
+          </button>
+          <button @click="clearInput" class="btn btn-secondary">
+            清空
+          </button>
+        </div>
+
+        <div v-if="executionResults.length > 0" class="command-results">
+          <h3 class="font-medium mb-3">执行结果</h3>
+          <div class="border rounded-lg p-4 max-h-60 overflow-y-auto bg-white/80">
+            <div 
+              v-for="(result, index) in executionResults" 
+              :key="index"
+              class="mb-2 pb-2 border-b last:border-b-0"
+            >
+              <div :class="result.status === 'success' ? 'status-success' : 'status-error'">
+                {{ result.message }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="command-side">
+        <div class="command-panel">
           <h3 class="font-medium mb-2">命令格式说明</h3>
           <p class="text-sm mb-2">
             每条命令由三部分组成，用斜杠分隔：
@@ -36,10 +71,10 @@
             多条命令之间用逗号分隔。
           </p>
         </div>
-        
-        <div class="bg-blue-50 p-4 rounded-lg mb-4">
+
+        <div class="command-panel command-panel-soft">
           <h3 class="font-medium mb-2">示例命令</h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div class="command-example-grid text-sm">
             <div class="bg-white p-2 rounded">
               <code>HOME/1/1,OK/1/1</code>
               <p class="text-gray-600">返回主屏幕，然后按OK键</p>
@@ -58,37 +93,7 @@
             </div>
           </div>
         </div>
-        
-        
-        
-        <div class="flex gap-4">
-          <button 
-            @click="executeCommands" 
-            class="btn btn-primary"
-            :disabled="!commandInput.trim() || executing"
-          >
-            {{ executing ? '执行中...' : '执行命令' }}
-          </button>
-          <button @click="clearInput" class="btn btn-secondary">
-            清空
-          </button>
-        </div>
-      </div>
-      
-      <div v-if="executionResults.length > 0" class="mt-6">
-        <h3 class="font-medium mb-3">执行结果</h3>
-        <div class="border rounded-lg p-4 max-h-60 overflow-y-auto">
-          <div 
-            v-for="(result, index) in executionResults" 
-            :key="index"
-            class="mb-2 pb-2 border-b last:border-b-0"
-          >
-            <div :class="result.status === 'success' ? 'status-success' : 'status-error'">
-              {{ result.message }}
-            </div>
-          </div>
-        </div>
-      </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -169,3 +174,77 @@ const clearInput = () => {
   executionResults.value = []
 }
 </script>
+
+<style scoped>
+.command-page {
+  padding: 22px;
+}
+
+.command-page-header {
+  margin-bottom: 16px;
+}
+
+.command-page-subtitle {
+  color: #6b7280;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.command-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.command-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.command-input {
+  min-height: 132px;
+}
+
+.command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.command-results {
+  margin-top: 2px;
+}
+
+.command-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.command-panel {
+  padding: 16px;
+  border-radius: 24px;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.command-panel-soft {
+  background: rgba(239, 246, 255, 0.88);
+}
+
+.command-example-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 1200px) {
+  .command-layout {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

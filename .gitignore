@@ -19,6 +19,8 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+Project/
+asr_models/
 
 # 后端
 backend/*.png
@@ -32,3 +34,20 @@ node_modules/
 .vite/
 dist/
 .DS_Store
+
+# 本地环境
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 本地运行产物
+runtime_state.json
+asr_runtime_state.json
+customization.json
+adbcontrol_port.txt
+screenshots/
+.venv-py314-freeze.txt

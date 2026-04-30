@@ -95,5 +95,36 @@ class ReadExcelCommandsTests(unittest.TestCase):
         self.assertEqual(result["valid_rows"][0]["preScript"], "HOME/1/0, OK/1/0")
 
 
+class ReadLastTtsTextTests(unittest.TestCase):
+    def setUp(self):
+        self.controller = ADBController()
+        self.controller.select_device("device-123")
+
+    def test_get_last_tts_text_returns_last_matching_value(self):
+        output = "".join([
+            '04-28 20:00:00.000 I SVOX Pico Engine: tts aric char ="first text"\n',
+            '04-28 20:00:01.000 I Something Else: ignore me\n',
+            '04-28 20:00:02.000 I SVOX Pico Engine: tts aric char ="second text"\n',
+        ])
+
+        def fake_run(command, check=False, capture_output=False, text=False, encoding=None, errors=None, **kwargs):
+            self.assertEqual(command, ["adb", "-s", "device-123", "logcat", "-d", "-t", "200"])
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+        with mock.patch("backend.app.utils.adb_controller.subprocess.run", side_effect=fake_run):
+            result = self.controller.get_last_tts_text()
+
+        self.assertEqual(result, "second text")
+
+    def test_get_last_tts_text_returns_none_when_no_match(self):
+        def fake_run(command, check=False, capture_output=False, text=False, encoding=None, errors=None, **kwargs):
+            return subprocess.CompletedProcess(command, 0, stdout="no matching log\n", stderr="")
+
+        with mock.patch("backend.app.utils.adb_controller.subprocess.run", side_effect=fake_run):
+            result = self.controller.get_last_tts_text()
+
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

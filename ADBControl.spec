@@ -1,9 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('frontend\\dist', 'frontend\\dist')]
+datas = [
+    ('frontend\\dist', 'frontend\\dist'),
+    ('backend\\test_cases', 'backend\\test_cases'),
+]
 binaries = []
-hiddenimports = ['anyio', 'uvicorn', 'fastapi', 'starlette', 'pydantic', 'pandas', 'numpy']
+hiddenimports = ['anyio', 'uvicorn', 'fastapi', 'starlette', 'pydantic', 'pandas', 'numpy', 'openpyxl', 'cv2', 'multipart']
 tmp_ret = collect_all('pydantic')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('starlette')
@@ -12,11 +15,17 @@ tmp_ret = collect_all('pandas')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('numpy')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('openpyxl')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('cv2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('multipart')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['run_app.py'],
-    pathex=[],
+    pathex=['.', 'backend'],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

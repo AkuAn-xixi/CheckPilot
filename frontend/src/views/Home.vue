@@ -102,40 +102,40 @@ const loadCurrentDevice = async () => {
 .home-hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
-  gap: 24px;
+  gap: 20px;
   align-items: start;
 }
 
 .home-title {
-  margin-top: 10px;
-  max-width: 12ch;
-  font-size: clamp(2.3rem, 5vw, 4.6rem);
+  margin-top: 8px;
+  max-width: 13ch;
+  font-size: clamp(2.1rem, 4.4vw, 4rem);
   line-height: 0.98;
   letter-spacing: -0.06em;
 }
 
 .home-subtitle {
-  margin-top: 18px;
+  margin-top: 14px;
   max-width: 62ch;
   color: #4b5563;
-  font-size: 1.04rem;
-  line-height: 1.8;
+  font-size: 0.98rem;
+  line-height: 1.68;
 }
 
 .home-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 22px;
 }
 
 .hero-stack {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .hero-card {
-  padding: 22px;
+  padding: 20px;
   border-radius: 28px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.62));
   border: 1px solid rgba(255, 255, 255, 0.75);
@@ -148,15 +148,15 @@ const loadCurrentDevice = async () => {
 
 .hero-card strong {
   display: block;
-  margin-top: 10px;
-  font-size: 1.7rem;
+  margin-top: 8px;
+  font-size: 1.55rem;
   letter-spacing: -0.04em;
 }
 
 .hero-card p {
-  margin-top: 10px;
+  margin-top: 8px;
   color: #6b7280;
-  line-height: 1.7;
+  line-height: 1.62;
 }
 
 .hero-label,
@@ -171,14 +171,14 @@ const loadCurrentDevice = async () => {
 }
 
 .home-stat-grid {
-  margin-top: 20px;
+  margin-top: 16px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .stat-card {
-  padding: 18px 20px;
+  padding: 16px 18px;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.62);
   border: 1px solid rgba(255, 255, 255, 0.68);
@@ -186,16 +186,16 @@ const loadCurrentDevice = async () => {
 
 .stat-card strong {
   display: block;
-  margin-top: 10px;
-  font-size: 1.2rem;
+  margin-top: 8px;
+  font-size: 1.12rem;
   letter-spacing: -0.03em;
 }
 
 .stat-card p,
 .feature-card p {
-  margin-top: 8px;
+  margin-top: 6px;
   color: #6b7280;
-  line-height: 1.7;
+  line-height: 1.58;
 }
 
 @media (max-width: 1100px) {

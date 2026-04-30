@@ -1,18 +1,47 @@
 import openpyxl
 import re
+import json
+from pathlib import Path
 from collections import Counter
 
-# 定义所有合法的按键名称
-VALID_KEYS = {
+# 默认合法按键名称（当配置文件不存在时使用）
+_DEFAULT_VALID_KEYS = {
     'OK', 'RIGHT', 'UP', 'LEFT', 'DOWN', 'SETTING', 'HOME', 'POWER', 'BACK',
     'SOURCE', 'MENU', 'CHUP', 'CHDOWN', 'DIGITAL', 'EXITMENU', 'DIGITAL1',
     'DIGITAL2', 'DIGITAL3', 'DIGITAL4', 'DIGITAL5', 'DIGITAL6', 'DIGITAL7',
     'DIGITAL8', 'DIGITAL9', 'DIGITAL0', 'LIBRARY', 'TV_AV', 'VOLUMEUP',
-    'VOLUMEDOWN', 'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'ACTION3', 'APPS', 'DIGITAL2','FILES','MUTE'
+    'VOLUMEDOWN', 'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'ACTION3', 'APPS', 'FILES', 'MUTE'
 }
+
+_CUSTOMIZATION_FILE = Path(__file__).resolve().parents[1] / "customization.json"
+
+
+def get_valid_keys() -> set:
+    """从配置文件加载合法按键集合，读取当前激活方案，不存在时返回默认值。"""
+    if _CUSTOMIZATION_FILE.exists():
+        try:
+            with open(_CUSTOMIZATION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # 同时兼容旧扁平格式和新方案格式
+            if "schemes" in data:
+                active = data.get("active_scheme", "默认")
+                scheme = data.get("schemes", {}).get(active, {})
+                keys = scheme.get("valid_keys")
+            else:
+                keys = data.get("valid_keys")
+            if isinstance(keys, list) and keys:
+                return set(keys)
+        except Exception:
+            pass
+    return set(_DEFAULT_VALID_KEYS)
+
+
+# 定义所有合法的按键名称
+VALID_KEYS = get_valid_keys()
 
 
 def validate_excel(file_path):
+    valid_keys = get_valid_keys()
     try:
         wb = openpyxl.load_workbook(file_path)
         sheet = wb.active
@@ -47,7 +76,7 @@ def validate_excel(file_path):
                     continue
 
                 key, count, time = parts
-                if key not in VALID_KEYS:
+                if key not in valid_keys:
                     print(f"错误：{col}{row} 按键名称'{key}'无效")
 
                 if not count.isdigit() or int(count) <= 0:

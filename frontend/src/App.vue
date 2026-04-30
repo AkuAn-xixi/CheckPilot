@@ -1,72 +1,78 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'excel-feature-shell': isExcelFeatureFullscreen }">
     <div class="app-orb app-orb-left"></div>
     <div class="app-orb app-orb-right"></div>
     <div class="app-grid"></div>
 
-    <header class="app-topbar">
-      <div class="app-topbar-inner">
-        <div class="brand-cluster">
-          <div class="brand-mark" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
+    <section v-if="isExcelFeatureFullscreen" class="app-fullscreen-content">
+      <router-view />
+    </section>
+
+    <template v-else>
+      <header class="app-topbar">
+        <div class="app-topbar-inner">
+          <div class="brand-cluster">
+            <div class="brand-mark" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div>
+              <p class="eyebrow">Precision Automation Workspace</p>
+              <h1 class="brand-title">ADB 控制中心</h1>
+            </div>
           </div>
-          <div>
-            <p class="eyebrow">Precision Automation Workspace</p>
-            <h1 class="brand-title">ADB 控制中心</h1>
+
+          <div class="topbar-summary">
+            <div class="topbar-pill">
+              <span class="pill-label">当前模块</span>
+              <strong>{{ currentSection.label }}</strong>
+              <span class="pill-value">{{ currentSection.description }}</span>
+            </div>
+            <div class="topbar-pill" :class="{ idle: !currentDevice }">
+              <span class="pill-label">设备连接</span>
+              <strong>{{ currentDevice ? '已连接' : '等待选择' }}</strong>
+              <span class="pill-value">{{ currentDevice || '未选择设备' }}</span>
+            </div>
           </div>
         </div>
+      </header>
 
-        <div class="topbar-summary">
-          <div class="topbar-pill">
-            <span class="pill-label">当前模块</span>
-            <strong>{{ currentSection.label }}</strong>
-            <span class="pill-value">{{ currentSection.description }}</span>
-          </div>
-          <div class="topbar-pill" :class="{ idle: !currentDevice }">
-            <span class="pill-label">设备连接</span>
-            <strong>{{ currentDevice ? '已连接' : '等待选择' }}</strong>
-            <span class="pill-value">{{ currentDevice || '未选择设备' }}</span>
-          </div>
-        </div>
-      </div>
-    </header>
+      <main class="app-main">
+        <aside class="app-sidebar">
+          <section class="card sidebar-panel">
+            <div class="sidebar-header">
+              <p class="eyebrow">Navigation</p>
+              <h2 class="sidebar-title">工作台</h2>
+            </div>
+            <nav class="nav-stack">
+              <router-link
+                v-for="(item, index) in navItems"
+                :key="item.to"
+                :to="item.to"
+                class="nav-link"
+                active-class="active"
+              >
+                <span class="nav-index">{{ String(index + 1).padStart(2, '0') }}</span>
+                <span class="nav-copy">
+                  <span class="nav-link-title">{{ item.label }}</span>
+                  <span class="nav-link-desc">{{ item.description }}</span>
+                </span>
+              </router-link>
+            </nav>
+          </section>
+        </aside>
 
-    <main class="app-main">
-      <aside class="app-sidebar">
-        <section class="card sidebar-panel">
-          <div class="sidebar-header">
-            <p class="eyebrow">Navigation</p>
-            <h2 class="sidebar-title">工作台</h2>
-          </div>
-          <nav class="nav-stack">
-            <router-link
-              v-for="(item, index) in navItems"
-              :key="item.to"
-              :to="item.to"
-              class="nav-link"
-              active-class="active"
-            >
-              <span class="nav-index">{{ String(index + 1).padStart(2, '0') }}</span>
-              <span class="nav-copy">
-                <span class="nav-link-title">{{ item.label }}</span>
-                <span class="nav-link-desc">{{ item.description }}</span>
-              </span>
-            </router-link>
-          </nav>
+        <section class="app-content">
+          <router-view />
         </section>
-      </aside>
+      </main>
 
-      <section class="app-content">
-        <router-view />
-      </section>
-    </main>
-
-    <footer class="app-footer">
-      <span>ADB Control Tool v1.1.0</span>
-      <span>{{ currentDevice ? `当前设备：${currentDevice}` : statusMessage }}</span>
-    </footer>
+      <footer class="app-footer">
+        <span>ADB Control Tool v1.1.0</span>
+        <span>{{ currentDevice ? `当前设备：${currentDevice}` : statusMessage }}</span>
+      </footer>
+    </template>
   </div>
 </template>
 
@@ -83,11 +89,20 @@ const navItems = [
   { to: '/devices', label: '设备管理', description: '连接、刷新并锁定目标设备' },
   { to: '/commands', label: '命令执行', description: '直接发送 ADB 指令与序列' },
   { to: '/excel', label: 'Excel 执行', description: '从用例表驱动步骤与截图校验' },
-  { to: '/keymonitor', label: '按键监听', description: '采集遥控器事件并清洗映射' }
+  { to: '/keymonitor', label: '按键监听', description: '采集遥控器事件并清洗映射' },
+  { to: '/customization', label: '客制化', description: '自定义按键列表等全局配置' }
 ]
 
 const currentSection = computed(() => {
-  return navItems.find((item) => item.to === route.path) || navItems[0]
+  if (route.path === '/') {
+    return navItems[0]
+  }
+
+  return navItems.find((item) => route.path === item.to || route.path.startsWith(`${item.to}/`)) || navItems[0]
+})
+
+const isExcelFeatureFullscreen = computed(() => {
+  return route.path.startsWith('/excel/cases') || route.path.startsWith('/excel/asr')
 })
 
 const loadCurrentDevice = async () => {
@@ -108,8 +123,26 @@ onMounted(async () => {
 <style scoped>
 .app-shell {
   position: relative;
-  min-height: 100vh;
-  padding: 24px;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 24px 14px;
+  overflow: hidden;
+}
+
+.app-shell.excel-feature-shell {
+  padding: 0;
+}
+
+.app-fullscreen-content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -154,21 +187,22 @@ onMounted(async () => {
 .app-footer {
   position: relative;
   z-index: 1;
+  width: 100%;
   max-width: 1480px;
   margin-left: auto;
   margin-right: auto;
 }
 
 .app-topbar {
-  margin-bottom: 24px;
+  margin-bottom: 18px;
 }
 
 .app-topbar-inner {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 20px 24px;
+  gap: 16px;
+  padding: 14px 20px;
   border-radius: 30px;
   border: 1px solid rgba(255, 255, 255, 0.66);
   background: rgba(255, 255, 255, 0.58);
@@ -179,17 +213,17 @@ onMounted(async () => {
 .brand-cluster {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .brand-mark {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-  width: 56px;
-  height: 56px;
-  padding: 8px;
-  border-radius: 18px;
+  gap: 4px;
+  width: 48px;
+  height: 48px;
+  padding: 7px;
+  border-radius: 16px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(226, 232, 240, 0.65));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 18px 40px rgba(15, 23, 42, 0.12);
 }
@@ -204,26 +238,26 @@ onMounted(async () => {
 }
 
 .brand-title {
-  margin-top: 4px;
-  font-size: clamp(1.8rem, 2.4vw, 2.45rem);
-  line-height: 1.02;
+  margin-top: 2px;
+  font-size: clamp(1.55rem, 2vw, 2.1rem);
+  line-height: 0.98;
   letter-spacing: -0.05em;
 }
 
 .topbar-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  min-width: min(100%, 560px);
+  gap: 10px;
+  min-width: min(100%, 500px);
 }
 
 .topbar-pill {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  padding: 14px 16px;
-  border-radius: 24px;
+  padding: 10px 14px;
+  border-radius: 20px;
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(255, 255, 255, 0.72);
 }
@@ -249,18 +283,23 @@ onMounted(async () => {
 }
 
 .app-main {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+  overflow: visible;
 }
 
 .app-sidebar {
   position: sticky;
-  top: 24px;
+  top: 0;
+  max-height: calc(100dvh - 160px);
   display: flex;
   flex-direction: column;
   gap: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -271,6 +310,11 @@ onMounted(async () => {
 
 .sidebar-panel {
   padding: 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  flex: 1;
 }
 
 .sidebar-title {
@@ -281,9 +325,19 @@ onMounted(async () => {
 
 .nav-stack {
   margin-top: 18px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 4px;
+}
+
+.nav-stack::-webkit-scrollbar {
+  width: 0;
 }
 
 .nav-index {
@@ -318,20 +372,40 @@ onMounted(async () => {
 }
 
 .app-content {
+  max-height: calc(100dvh - 160px);
+  flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  padding-right: 4px;
+}
+
+.app-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.app-content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+.app-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .app-footer {
-  margin-top: 24px;
+  margin-top: 14px;
   display: flex;
   justify-content: space-between;
   gap: 16px;
   padding: 0 6px;
   color: #6b7280;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
 }
 
 @media (max-width: 1100px) {

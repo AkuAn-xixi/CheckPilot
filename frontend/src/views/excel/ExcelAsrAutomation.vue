@@ -2,25 +2,25 @@
   <div class="card w-full max-w-7xl mx-auto excel-execution-page">
     <div class="mb-4 flex flex-wrap items-center gap-3">
       <router-link to="/excel" class="btn btn-secondary btn-sm">
-        返回功能选择
+        {{ $t('common.chooseFeature') }}
       </router-link>
-      <h2 class="mb-0">ASR 校验执行</h2>
+      <h2 class="mb-0">{{ $t('excelAsr.title') }}</h2>
     </div>
 
     <div class="excel-execution-scroll">
-      <div class="space-y-6">
-      <section class="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
+      <div class="space-y-4">
+      <section class="excel-section-card rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div class="min-w-0">
-            <p class="eyebrow">Excel ASR</p>
-            <h3 class="mt-2 text-xl font-semibold tracking-tight text-slate-900">环境与文件准备</h3>
+            <p class="eyebrow">{{ $t('excelAsr.eyebrow') }}</p>
+            <h3 class="mt-2 text-xl font-semibold tracking-tight text-slate-900">{{ $t('excelAsr.prepTitle') }}</h3>
             <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
-              选择 Excel 后可逐条执行、批量执行已选用例，或直接串行执行当前文件中的全部 ASR 用例。
+              {{ $t('excelAsr.prepSubtitle') }}
             </p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <button class="btn btn-secondary btn-sm" @click="loadStatus" :disabled="loadingStatus">
-              {{ loadingStatus ? '刷新中...' : '刷新状态' }}
+              {{ loadingStatus ? $t('common.refreshing') : $t('common.refreshStatus') }}
             </button>
           </div>
         </div>
@@ -30,17 +30,17 @@
         </div>
 
         <div v-if="missingAsrDependencies.length" class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-amber-900">
-          <p class="font-medium">当前后端环境未完成 ASR 准备，执行按钮已提前禁用。</p>
-          <p class="mt-2">当前 Python：{{ asrDependencyStatus.python_version || '未知' }}</p>
-          <p>建议 Python：{{ asrDependencyStatus.recommended_python_version || '3.12' }}</p>
-          <p class="mt-1 leading-6">缺少依赖：{{ missingAsrDependencies.join('、') }}</p>
+          <p class="font-medium">{{ $t('excelAsr.dependencyWarning') }}</p>
+          <p class="mt-2">{{ $t('excelAsr.currentPython', { version: asrDependencyStatus.python_version || $t('common.unknown') }) }}</p>
+          <p>{{ $t('excelAsr.recommendedPython', { version: asrDependencyStatus.recommended_python_version || '3.12' }) }}</p>
+          <p class="mt-1 leading-6">{{ $t('excelAsr.missingDependencies', { dependencies: missingAsrDependencies.join(', ') }) }}</p>
 
           <div v-if="asrDependencyStatus.notes?.length" class="mt-3 space-y-1 text-xs leading-5 text-amber-800">
             <div v-for="(note, index) in asrDependencyStatus.notes" :key="index">{{ note }}</div>
           </div>
 
           <div v-if="asrDependencyStatus.install_steps?.length" class="mt-4 rounded-lg bg-white/70 p-4">
-            <p class="text-sm font-medium mb-2">处理步骤：</p>
+            <p class="text-sm font-medium mb-2">{{ $t('excelAsr.handlingSteps') }}</p>
             <div class="space-y-1 text-sm leading-6">
               <div v-for="(step, index) in asrDependencyStatus.install_steps" :key="index">
                 {{ index + 1 }}. {{ step }}
@@ -54,34 +54,87 @@
         </div>
       </section>
 
-      <div class="mb-6">
-        <h3 class="font-medium mb-3">选择Excel文件</h3>
-        <button @click="loadExcelFiles" class="btn btn-secondary mb-4" :disabled="loadingFiles">
-          {{ loadingFiles ? '刷新中...' : '刷新文件列表' }}
-        </button>
-
-        <div v-if="loadingFiles">
-          <p>加载中...</p>
+      <div class="excel-top-grid mb-6">
+      <section v-if="showCompactFileSelectorPanel" class="excel-top-compact-card excel-section-card mb-0 rounded-[24px] border border-white/70 bg-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
+        <div class="excel-top-compact-header">
+          <div class="min-w-0">
+            <p class="eyebrow">{{ $t('excelExecution.chooseExcel') }}</p>
+            <h3 class="excel-top-compact-title">{{ selectedFile }}</h3>
+            <p class="excel-top-compact-meta">{{ $t('excelExecution.fileReadyHint') }}</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button @click="analyzeFile" class="btn btn-primary btn-sm" :disabled="loadingAnalysis || !selectedFile">
+              {{ loadingAnalysis ? $t('common.analyzing') : $t('common.analyzeFile') }}
+            </button>
+            <button
+              v-if="validationResult"
+              @click="openValidationResultModal"
+              class="btn btn-secondary btn-sm"
+              :disabled="loadingAnalysis"
+            >
+              {{ $t('excelExecution.viewAnalysisResult') }}
+            </button>
+            <button @click="expandFileSelectorPanel" class="btn btn-secondary btn-sm">
+              {{ $t('excelExecution.changeSelectedFile') }}
+            </button>
+          </div>
+        </div>
+      </section>
+      <section v-else class="excel-file-panel excel-section-card mb-0 rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div class="min-w-0">
+            <p class="eyebrow">{{ $t('excelExecution.chooseExcel') }}</p>
+            <div class="mt-2 flex flex-wrap items-center gap-3">
+              <h3 class="text-lg font-semibold tracking-tight text-slate-900">{{ selectedFile || $t('common.notSelected') }}</h3>
+              <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">
+                {{ $t('common.total', { count: excelFiles.length }) }}
+              </span>
+            </div>
+            <p class="mt-2 text-sm leading-6 text-gray-500">
+              {{ $t('excelAsr.prepSubtitle') }}
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button @click="loadExcelFiles" class="btn btn-secondary btn-sm" :disabled="loadingFiles">
+              {{ loadingFiles ? $t('common.refreshing') : $t('common.refreshFileList') }}
+            </button>
+            <button class="btn btn-primary btn-sm" @click="triggerExcelUpload">{{ $t('common.uploadExcel') }}</button>
+            <button @click="analyzeFile" class="btn btn-primary btn-sm" :disabled="loadingAnalysis || !selectedFile">
+              {{ loadingAnalysis ? $t('common.analyzing') : $t('common.analyzeFile') }}
+            </button>
+            <button
+              v-if="validationResult"
+              @click="openValidationResultModal"
+              class="btn btn-secondary btn-sm"
+              :disabled="loadingAnalysis"
+            >
+              {{ $t('excelExecution.viewAnalysisResult') }}
+            </button>
+          </div>
         </div>
 
-        <div v-if="excelFiles.length > 0">
-          <p class="mb-3">当前目录下的Excel文件：</p>
-          <div class="space-y-2 mb-4">
+        <div v-if="loadingFiles" class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+          {{ $t('common.loading') }}
+        </div>
+
+        <template v-else-if="excelFiles.length > 0">
+          <p class="mt-4 mb-3 text-sm text-slate-500">{{ $t('common.currentDirectoryExcelFiles') }}</p>
+          <div class="excel-file-list space-y-2">
             <div
               v-for="(file, index) in excelFiles"
               :key="file"
-              class="border rounded-lg p-4 cursor-pointer hover:bg-gray-50"
+              class="excel-file-item border rounded-lg cursor-pointer bg-white/80 hover:bg-gray-50"
               :class="selectedFile === file ? 'border-primary bg-blue-50' : ''"
               @click="selectFile(file)"
             >
               <div class="flex items-center justify-between gap-4">
                 <div class="flex-1 min-w-0">
-                  <p class="font-medium">文件 {{ index + 1 }}</p>
+                  <p class="font-medium">{{ $t('common.fileNumber', { index: index + 1 }) }}</p>
                   <p class="text-gray-600 truncate">{{ file }}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <button class="btn btn-danger" @click.stop="deleteFile(file)" :disabled="deletingFile">
-                    删除
+                  <button class="btn btn-danger btn-sm" @click.stop="deleteFile(file)" :disabled="deletingFile">
+                    {{ $t('common.delete') }}
                   </button>
                   <div class="text-primary" v-if="selectedFile === file">
                     ✅
@@ -90,54 +143,70 @@
               </div>
             </div>
           </div>
-        </div>
+        </template>
 
-        <div class="mb-4 flex items-center gap-2">
-          <button class="btn btn-primary" @click="triggerExcelUpload">上传Excel文件</button>
-          <button @click="analyzeFile" class="btn btn-primary" :disabled="loadingAnalysis || !selectedFile">
-            {{ loadingAnalysis ? '分析中...' : '分析文件' }}
-          </button>
+        <div v-else class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+          <p class="text-danger mb-4">{{ $t('common.noExcelFiles') }}</p>
+          <h4 class="font-medium mb-2">{{ $t('common.hint') }}</h4>
+          <p class="text-sm mb-2">{{ $t('excelAsr.uploadTip1') }}</p>
+          <p class="text-sm">{{ $t('excelAsr.uploadTip2') }}</p>
         </div>
+      </section>
 
-        <div v-if="excelFiles.length === 0">
-          <p class="text-danger mb-4">当前目录下没有找到Excel文件。</p>
-          <div class="bg-yellow-50 p-4 rounded-lg mb-4">
-            <h4 class="font-medium mb-2">提示：</h4>
-            <p class="text-sm mb-2">请将 Excel 文件放在应用程序所在的目录中，支持 .xlsx 和 .xls 格式。</p>
-            <p class="text-sm">或者使用上面的按钮上传 Excel 文件。</p>
+      <section v-if="showCompactModelSelectorPanel" class="excel-top-compact-card excel-section-card mb-0 rounded-[24px] border border-white/70 bg-white/65 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
+        <div class="excel-top-compact-header">
+          <div class="min-w-0">
+            <p class="eyebrow">{{ $t('excelAsr.modelSetup') }}</p>
+            <h3 class="excel-top-compact-title">{{ activeModelName || $t('excelAsr.noActiveModel') }}</h3>
+            <p class="excel-top-compact-meta">{{ $t('excelAsr.currentDevice', { device: selectedDevice || $t('common.notSelected') }) }}</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="btn btn-secondary btn-sm" @click="loadStatus" :disabled="loadingStatus || importingModel || selectingModel || deletingModel">
+              {{ loadingStatus ? $t('common.refreshing') : $t('common.refreshStatus') }}
+            </button>
+            <button class="btn btn-secondary btn-sm" @click="expandModelSelectorPanel">
+              {{ $t('excelExecution.changeSelectedModel') }}
+            </button>
           </div>
         </div>
-      </div>
-
-      <div class="mb-6 rounded-[28px] border border-white/70 bg-white/65 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
+      </section>
+      <section v-else class="excel-section-card excel-top-model-panel mb-0 rounded-[28px] border border-white/70 bg-white/65 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
         <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div class="min-w-0">
-            <p class="eyebrow">Model Setup</p>
+            <p class="eyebrow">{{ $t('excelAsr.modelSetup') }}</p>
             <div class="mt-2 flex flex-wrap items-center gap-3">
-              <h3 class="text-lg font-semibold tracking-tight">模型导入与切换</h3>
+              <h3 class="text-lg font-semibold tracking-tight">{{ $t('excelAsr.modelTitle') }}</h3>
               <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">
-                {{ activeModelName ? `当前模型：${activeModelName}` : '未选择模型' }}
+                {{ activeModelName ? $t('excelAsr.activeModel', { model: activeModelName }) : $t('excelAsr.noActiveModel') }}
               </span>
             </div>
             <p class="mt-2 text-sm leading-6 text-gray-500">
-              导入模型目录后即可在这里切换当前模型，ASR 执行会直接沿用当前选择。
+              {{ $t('excelAsr.modelSubtitle') }}
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <button class="btn btn-secondary btn-sm" @click="loadStatus" :disabled="loadingStatus || importingModel || selectingModel || deletingModel">
-              {{ loadingStatus ? '刷新中...' : '刷新状态' }}
+              {{ loadingStatus ? $t('common.refreshing') : $t('common.refreshStatus') }}
             </button>
             <button class="btn btn-primary btn-sm" @click="triggerModelFolderPicker" :disabled="importingModel || selectingModel || deletingModel">
-              {{ importingModel ? `导入中 ${modelImportProgress.completed}/${modelImportProgress.total}` : '导入模型目录' }}
+              {{ importingModel ? $t('excelAsr.importingModel', { completed: modelImportProgress.completed, total: modelImportProgress.total }) : $t('excelAsr.importModelDirectory') }}
+            </button>
+            <button
+              class="btn btn-secondary btn-sm"
+              @click="downloadCohereTranscribe"
+              :disabled="downloadingCohere || importingModel || selectingModel || deletingModel"
+              :title="$t('excelAsr.downloadCohereHint')"
+            >
+              {{ downloadingCohere ? $t('excelAsr.downloadingCohere') : $t('excelAsr.downloadCohere') }}
             </button>
           </div>
         </div>
 
         <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-          <span>已导入模型：{{ status.imported_models?.length || 0 }} 个</span>
-          <span>当前设备：{{ selectedDevice || '未选择' }}</span>
+          <span>{{ $t('excelAsr.importedModels', { count: status.imported_models?.length || 0 }) }}</span>
+          <span>{{ $t('excelAsr.currentDevice', { device: selectedDevice || $t('common.notSelected') }) }}</span>
           <span :class="missingAsrDependencies.length ? 'text-warning' : 'text-success'">
-            环境状态：{{ missingAsrDependencies.length ? '缺少依赖' : '已就绪' }}
+            {{ $t('excelAsr.environmentStatus', { status: missingAsrDependencies.length ? $t('common.missingDependencies') : $t('common.ready') }) }}
           </span>
         </div>
 
@@ -151,17 +220,23 @@
               <div class="flex-1 min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <p class="font-medium">{{ model.name }}</p>
-                  <span v-if="model.is_active" class="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">当前使用</span>
-                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ model.file_count }} 个文件</span>
+                  <span v-if="model.is_active" class="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">{{ $t('excelAsr.modelInUse') }}</span>
+                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ $t('excelAsr.modelFiles', { count: model.file_count }) }}</span>
+                  <span
+                    v-if="formatBackendKindLabel(model.kind)"
+                    class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700"
+                  >
+                    {{ formatBackendKindLabel(model.kind) }}
+                  </span>
                 </div>
                 <p class="text-gray-500 text-sm break-all mt-2">{{ model.path }}</p>
               </div>
               <div class="flex items-center gap-2">
                 <button class="btn btn-secondary" @click="selectModel(model.name)" :disabled="selectingModel || deletingModel || importingModel || model.is_active">
-                  {{ model.is_active ? '已选中' : '设为当前模型' }}
+                  {{ model.is_active ? $t('excelAsr.selectedModel') : $t('excelAsr.useThisModel') }}
                 </button>
                 <button class="btn btn-danger" @click="deleteModel(model.name)" :disabled="deletingModel || selectingModel || importingModel">
-                  删除
+                  {{ $t('common.delete') }}
                 </button>
               </div>
             </div>
@@ -169,56 +244,160 @@
         </div>
 
         <div v-else class="mt-4 bg-yellow-50 p-4 rounded-lg">
-          <p class="text-sm text-gray-600">还没有导入模型。请先导入本地模型目录，再执行 ASR 用例。</p>
+          <p class="text-sm text-gray-600">{{ $t('excelAsr.noModels') }}</p>
+        </div>
+      </section>
+      </div>
+
+      <!-- 执行设置 -->
+      <div class="mb-4 flex items-center gap-3">
+        <button
+          class="btn btn-secondary btn-sm"
+          @click="showExecutionSettings = !showExecutionSettings"
+        >
+          ⚙ {{ showExecutionSettings ? '隐藏设置' : '执行设置' }}
+        </button>
+      </div>
+
+      <div v-if="showExecutionSettings" class="mb-6 rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+          <!-- 匹配阈值 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">匹配阈值</label>
+            <div class="flex items-center gap-2">
+              <input
+                v-model.number="matchThreshold"
+                type="range"
+                min="0.5"
+                max="1"
+                step="0.01"
+                class="flex-1"
+              >
+              <input
+                v-model.number="matchThreshold"
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                class="form-input w-16 text-center text-sm"
+              >
+            </div>
+          </div>
+
+          <!-- 执行模式 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">执行模式</label>
+            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors"
+                :class="executionMode === 'single' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="executionMode = 'single'"
+              >单次</button>
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                :class="executionMode === 'loop_row' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="executionMode = 'loop_row'"
+              >单行循环</button>
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                :class="executionMode === 'loop_list' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="executionMode = 'loop_list'"
+              >列表循环</button>
+            </div>
+          </div>
+
+          <!-- 执行后校验 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">执行后校验</label>
+            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors"
+                :class="enableVerification ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="enableVerification = true"
+              >开启</button>
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                :class="!enableVerification ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="enableVerification = false"
+              >关闭</button>
+            </div>
+          </div>
+
+          <!-- 执行录屏 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">执行录屏</label>
+            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors"
+                :class="enableRecording ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="enableRecording = true"
+              >开启</button>
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                :class="!enableRecording ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="enableRecording = false"
+              >关闭</button>
+            </div>
+          </div>
+
+          <!-- 录制模式 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">录制模式</label>
+            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors"
+                :class="audioInputMode === 'speaker' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="onAudioModeChange('speaker')"
+              >外放</button>
+              <button
+                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                :class="audioInputMode === 'capture_card' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="onAudioModeChange('capture_card')"
+              >采集卡</button>
+            </div>
+          </div>
+
+          <!-- 音频输入设备 -->
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">音频输入设备</label>
+              <button class="text-xs text-blue-500 hover:text-blue-700" @click="loadAudioDevices" :disabled="loadingAudioDevices">
+                {{ loadingAudioDevices ? '刷新中...' : '刷新' }}
+              </button>
+            </div>
+            <select
+              class="form-input w-full text-sm"
+              :value="audioDeviceIndex ?? ''"
+              @change="onAudioDeviceChange($event.target.value)"
+            >
+              <option value="">系统默认</option>
+              <option v-for="device in audioDevices" :key="device.index" :value="device.index">
+                [{{ device.type === 'output' ? '输出' : '输入' }}|{{ device.hostapi }}] {{ device.name }} {{ device.is_default ? '(默认)' : '' }}
+              </option>
+            </select>
+          </div>
+
         </div>
       </div>
 
       <div v-if="selectedFile" class="mb-6">
-        <div v-if="validationResult" ref="analysisSection" class="mb-4">
-          <div class="p-4 rounded-lg" :class="validationResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
-            <h4 class="font-medium mb-2 flex items-center gap-2">
-              <span class="text-xl" :class="validationResult.success ? 'text-green-600' : 'text-red-600'">
-                {{ validationResult.success ? '✅' : '❌' }}
-              </span>
-              文件验证结果 - {{ validationResult.success ? '通过' : '发现问题' }} (共 {{ validationResult.total_rows }} 行)
-            </h4>
-
-            <div v-if="validationResult.errors && validationResult.errors.length > 0" class="mt-2">
-              <p class="text-sm font-medium text-red-700 mb-1">错误列表：</p>
-              <div class="text-sm text-red-600 space-y-1 max-h-40 overflow-y-auto">
-                <div v-for="(error, idx) in validationResult.errors" :key="idx" class="break-all">
-                  • {{ error }}
-                </div>
-              </div>
-            </div>
-
-            <div v-if="validationResult.warnings && validationResult.warnings.length > 0" class="mt-2">
-              <p class="text-sm font-medium text-yellow-700 mb-1">警告列表：</p>
-              <div class="text-sm text-yellow-600 space-y-1">
-                <div v-for="(warning, idx) in validationResult.warnings" :key="idx" class="break-all">
-                  • {{ warning }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div v-if="loadingAnalysis">
-          <p>分析中...</p>
+          <p>{{ $t('common.analyzing') }}</p>
         </div>
 
         <div v-else-if="excelAnalysis">
           <div v-if="excelAnalysis.valid_rows.length > 0">
-            <p class="mb-3">找到 {{ excelAnalysis.valid_rows.length }} 行有效命令：</p>
+            <p class="mb-3">{{ $t('common.foundValidRows', { count: excelAnalysis.valid_rows.length }) }}</p>
 
             <div class="mb-4 flex flex-wrap gap-4 items-center">
               <div class="flex-1 min-w-[200px]">
-                <label class="form-label mr-2">搜索：</label>
+                <label class="form-label mr-2">{{ $t('common.search') }}</label>
                 <input
                   v-model="searchKeyword"
                   type="text"
                   class="form-input w-full"
-                  placeholder="搜索用例标题或步骤内容"
+                  :placeholder="$t('excelAsr.searchPlaceholder')"
                 >
               </div>
             </div>
@@ -226,73 +405,22 @@
             <div class="mb-4 flex justify-between items-center gap-3 flex-wrap">
               <div class="flex flex-wrap items-center gap-3">
                 <button class="btn btn-success" @click="executeSelectedRows" :disabled="selectedRows.length === 0 || isBatchExecuting || hasActiveExecution || !canExecuteAsr">
-                  批量执行 ({{ selectedRows.length }})
+                  {{ $t('excelAsr.batchExecute', { count: selectedRows.length }) }}
                 </button>
                 <button class="btn btn-primary" @click="executeAllRows" :disabled="allRowIndexes.length === 0 || isBatchExecuting || hasActiveExecution || !canExecuteAsr">
-                  执行全部用例 ({{ allRowIndexes.length }})
+                  {{ $t('excelAsr.executeAll', { count: allRowIndexes.length }) }}
+                </button>
+                <button v-if="latestBatchReport?.report_url" class="btn btn-secondary" @click="openLatestBatchReport">
+                  {{ $t('excelAsr.openLatestReport') }}
                 </button>
               </div>
               <button class="btn btn-danger" @click="stopAllExecution" :disabled="!isBatchExecuting">
-                停止所有执行
+                {{ $t('excelAsr.stopAll') }}
               </button>
             </div>
 
-            <section class="mb-5 rounded-[28px] border border-white/70 bg-white/65 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
-              <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div class="min-w-0">
-                  <p class="eyebrow">Execution Console</p>
-                  <div class="mt-2 flex flex-wrap items-center gap-3">
-                    <h3 class="text-lg font-semibold tracking-tight">执行日志</h3>
-                    <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">
-                      {{ executionResults.length ? `共 ${executionResults.length} 条` : '等待执行输出' }}
-                    </span>
-                  </div>
-                  <p class="mt-2 text-sm leading-6 text-gray-500">
-                    实时显示发送按键、TTS 文本、录音、识别和文本比对反馈。新日志会自动滚动到最新一条，不再遮挡表格内容。
-                  </p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">信息 {{ executionLogStats.info }}</span>
-                  <span class="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">成功 {{ executionLogStats.success }}</span>
-                  <span class="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">异常 {{ executionLogStats.error }}</span>
-                  <button class="btn btn-secondary btn-sm" @click="clearExecutionLogs" :disabled="executionResults.length === 0">
-                    清空日志
-                  </button>
-                </div>
-              </div>
-
-              <div ref="executionLogContainer" class="mt-4 max-h-80 overflow-y-auto rounded-[22px] border border-slate-200/80 bg-slate-50/85 p-3 sm:p-4">
-                <div v-if="executionResults.length === 0" class="flex min-h-32 items-center justify-center rounded-[18px] border border-dashed border-slate-200 bg-white/70 text-sm text-gray-400">
-                  暂无执行日志，开始执行后会在这里实时显示。
-                </div>
-                <div v-else class="space-y-2">
-                  <div v-for="(result, index) in executionResults" :key="index" class="flex items-start gap-3 rounded-[18px] border border-white/80 bg-white/80 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
-                    <span
-                      class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-                      :class="{
-                        'bg-blue-500': result.status === 'info',
-                        'bg-green-500': result.status === 'success',
-                        'bg-red-500': result.status === 'error'
-                      }"
-                    ></span>
-                    <div class="min-w-0">
-                      <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-400">
-                        {{ executionStatusLabel(result.status) }}
-                      </div>
-                      <p class="mt-1 break-all text-sm leading-6 text-slate-700">
-                        {{ result.message }}
-                      </p>
-                      <p v-if="result.tts_text" class="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-500">TTS 文本：{{ result.tts_text }}</p>
-                      <p v-if="result.transcribed_text" class="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-500">识别文本：{{ result.transcribed_text }}</p>
-                      <p v-if="result.reference_text" class="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-500">参考文本：{{ result.reference_text }}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <div class="mb-4 overflow-x-auto rounded-[28px] border border-white/70 bg-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
-              <table class="w-full min-w-[980px] table-fixed">
+            <div class="excel-table-shell mb-4 overflow-x-auto rounded-[28px] border border-white/70 bg-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
+              <table class="excel-results-table w-full min-w-[980px] table-fixed">
                 <colgroup>
                   <col style="width: 52px;">
                   <col style="width: 220px;">
@@ -305,10 +433,10 @@
                     <th class="border px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
                       <input type="checkbox" @change="toggleSelectAll" :checked="isPageAllSelected">
                     </th>
-                    <th class="border px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">用例标题</th>
-                    <th class="border px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">操作步骤</th>
-                    <th class="border px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">操作</th>
-                    <th class="border px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">ASR 结果</th>
+                    <th class="border px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{{ $t('excelAsr.columns.title') }}</th>
+                    <th class="border px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{{ $t('excelAsr.columns.steps') }}</th>
+                    <th class="border px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{{ $t('excelAsr.columns.actions') }}</th>
+                    <th class="border px-3 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{{ $t('excelAsr.columns.result') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -321,26 +449,46 @@
                       <span v-else>-</span>
                     </td>
                     <td class="border px-3 py-3 align-top">
-                      <div v-if="getRowStepSegments(item.row).length" class="space-y-2">
-                        <div
-                          v-for="(segment, segmentIndex) in getRowStepSegments(item.row)"
-                          :key="segmentIndex"
-                          class="truncate rounded-2xl bg-slate-50/92 px-3 py-2 text-sm leading-5 text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]"
-                          :title="segment"
+                      <!-- 执行中：指令动效（展开，支持换行） -->
+                      <div v-if="executingRows[item.idx] && getRowCommandTokens(item.row).length" class="excel-step-group">
+                        <span
+                          v-for="cmd in getRowCommandTokens(item.row)"
+                          :key="cmd.id"
+                          class="excel-step-command"
+                          :class="{ 'excel-step-command-active': isCommandActive(item.idx, cmd) }"
+                          :title="cmd.raw"
                         >
-                          {{ segment }}
-                        </div>
+                          <span class="excel-step-command-key">{{ cmd.key }}</span>
+                          <span v-if="cmd.meta" class="excel-step-command-meta">{{ cmd.meta }}</span>
+                          <span v-if="getCommandProgress(item.idx, cmd)" class="excel-step-command-progress">{{ getCommandProgress(item.idx, cmd) }}</span>
+                        </span>
+                      </div>
+                      <!-- 未执行：指令序列（单行，溢出渐隐） -->
+                      <div
+                        v-else-if="getRowCommandTokens(item.row).length"
+                        class="excel-step-sequence-collapsed"
+                        :title="getRowCommandTokens(item.row).map(c => c.raw).join(', ')"
+                      >
+                        <span
+                          v-for="cmd in getRowCommandTokens(item.row)"
+                          :key="cmd.id"
+                          class="excel-step-command"
+                          :title="cmd.raw"
+                        >
+                          <span class="excel-step-command-key">{{ cmd.key }}</span>
+                          <span v-if="cmd.meta" class="excel-step-command-meta">{{ cmd.meta }}</span>
+                        </span>
                       </div>
                       <span v-else>-</span>
                     </td>
                     <td class="border px-3 py-3 text-center align-top">
-                      <div class="flex flex-col items-center gap-2">
+                      <div class="excel-row-actions flex flex-col items-center gap-2">
                         <button
                           class="btn btn-secondary min-w-[88px] whitespace-nowrap"
                           @click="openCaseEditModal(item)"
                           :disabled="savingCaseFields || executingRows[item.idx]"
                         >
-                          编辑
+                          {{ $t('common.edit') }}
                         </button>
                         <button
                           v-if="!executingRows[item.idx]"
@@ -348,14 +496,14 @@
                           @click="executeAsrRowByIndex(item.idx)"
                           :disabled="!canExecuteAsr || isBatchExecuting || hasActiveExecution"
                         >
-                          执行
+                          {{ $t('common.execute') }}
                         </button>
                         <button
                           v-else
                           class="btn btn-danger min-w-[88px] whitespace-nowrap"
                           @click="stopExecution(item.idx)"
                         >
-                          停止执行
+                          {{ $t('common.stop') }}
                         </button>
                       </div>
                     </td>
@@ -374,13 +522,13 @@
                           </span>
                         </div>
                         <p v-if="rowRunMeta[item.idx].tts_text" class="line-clamp-3 text-xs leading-5 text-slate-500" :title="rowRunMeta[item.idx].tts_text">
-                          TTS：{{ rowRunMeta[item.idx].tts_text }}
+                          {{ $t('excelAsr.ttsShort', { text: rowRunMeta[item.idx].tts_text }) }}
                         </p>
                         <p v-if="rowRunMeta[item.idx].transcribed_text" class="line-clamp-3 text-xs leading-5 text-slate-500" :title="rowRunMeta[item.idx].transcribed_text">
                           {{ rowRunMeta[item.idx].transcribed_text }}
                         </p>
                         <p v-else-if="rowRunMeta[item.idx].asr_result === 'NO_REF'" class="text-xs leading-5 text-amber-600">
-                          缺少参考文本，仅返回识别结果。
+                          {{ $t('excelAsr.noReference') }}
                         </p>
                       </div>
                       <span v-else>-</span>
@@ -392,19 +540,19 @@
 
             <div class="flex items-center justify-between flex-wrap gap-3">
               <div class="flex items-center gap-2">
-                <span>每页</span>
+                <span>{{ $t('common.perPage') }}</span>
                 <select v-model.number="pageSize" class="form-select">
                   <option :value="10">10</option>
                   <option :value="20">20</option>
                   <option :value="50">50</option>
                 </select>
-                <span>条</span>
+                <span>{{ $t('common.items') }}</span>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
-                <button class="btn btn-secondary" @click="handlePrevPage" :disabled="currentPage === 1">上一页</button>
-                <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+                <button class="btn btn-secondary" @click="handlePrevPage" :disabled="currentPage === 1">{{ $t('common.previousPage') }}</button>
+                <span>{{ $t('common.pageInfo', { current: currentPage, total: totalPages }) }}</span>
                 <div class="flex items-center gap-1">
-                  <span>跳转到</span>
+                  <span>{{ $t('common.goTo') }}</span>
                   <input
                     v-model.number="jumpPage"
                     type="number"
@@ -413,36 +561,107 @@
                     :max="totalPages"
                     @keyup.enter="handleJumpPage"
                   >
-                  <button class="btn btn-primary btn-sm" @click="handleJumpPage" :disabled="!jumpPage || jumpPage < 1 || jumpPage > totalPages">跳转</button>
+                  <button class="btn btn-primary btn-sm" @click="handleJumpPage" :disabled="!jumpPage || jumpPage < 1 || jumpPage > totalPages">{{ $t('common.jump') }}</button>
                 </div>
-                <button class="btn btn-secondary" @click="handleNextPage" :disabled="currentPage === totalPages">下一页</button>
-                <span>共 {{ filteredRows.length }} 条</span>
+                <button class="btn btn-secondary" @click="handleNextPage" :disabled="currentPage === totalPages">{{ $t('common.nextPage') }}</button>
+                <span>{{ $t('common.total', { count: filteredRows.length }) }}</span>
               </div>
             </div>
 
-            <div v-if="excelAnalysis.skipped_rows?.length > 0" class="bg-yellow-50 p-4 rounded-lg mb-4 mt-4">
-              <h4 class="font-medium mb-2">跳过的行：</h4>
+            <div v-if="excelAnalysis.skipped_rows?.length > 0" class="excel-note-card bg-yellow-50 p-4 rounded-lg mb-4 mt-4">
+              <h4 class="font-medium mb-2">{{ $t('excelExecution.skippedRows') }}</h4>
               <div class="space-y-2 max-h-40 overflow-y-auto">
                 <div v-for="(row, index) in excelAnalysis.skipped_rows" :key="index" class="text-sm">
-                  <div class="break-all">第{{ row.row }}行: {{ row.reason }}</div>
+                  <div class="break-all">{{ $t('excelExecution.rowFallbackTitle', { row: row.row }) }}: {{ row.reason }}</div>
                 </div>
               </div>
             </div>
           </div>
 
           <div v-else>
-            <p class="text-danger">文件中没有找到有效命令。</p>
+            <p class="text-danger">{{ $t('excelExecution.noValidCommands') }}</p>
           </div>
         </div>
       </div>
 
-      <div v-if="showCaseEditModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div
+        v-if="showValidationResultModal && validationResult"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="closeValidationResultModal"
+      >
+        <div class="bg-white rounded-[24px] shadow-xl p-5 w-[92vw] max-w-4xl max-h-[88vh] overflow-hidden flex flex-col">
+          <div class="flex items-start justify-between gap-4 mb-4">
+            <div class="min-w-0">
+              <h3 class="text-lg font-medium break-words">
+                {{ $t('common.fileValidationResult', { status: validationResult.success ? $t('common.pass') : $t('common.fail'), count: validationResult.total_rows }) }}
+              </h3>
+              <p v-if="selectedFile" class="text-sm text-gray-500 mt-1 break-all">{{ selectedFile }}</p>
+            </div>
+            <button @click="closeValidationResultModal" class="text-gray-500 hover:text-gray-700">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="overflow-y-auto pr-1 space-y-4">
+            <div
+              class="rounded-[20px] border px-4 py-4"
+              :class="validationResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'"
+            >
+              <div class="flex items-start gap-3">
+                <span
+                  class="text-xl"
+                  :class="validationResult.success ? 'text-green-600' : 'text-red-600'"
+                >
+                  {{ validationResult.success ? '✅' : '❌' }}
+                </span>
+                <div class="min-w-0">
+                  <p class="font-medium text-slate-900">
+                    {{ $t('common.fileValidationResult', { status: validationResult.success ? $t('common.pass') : $t('common.fail'), count: validationResult.total_rows }) }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="validationResult.errors && validationResult.errors.length > 0" class="rounded-[20px] border border-red-200 bg-red-50 px-4 py-4">
+              <p class="text-sm font-medium text-red-700 mb-2">{{ $t('common.errors') }}</p>
+              <div class="space-y-1 text-sm text-red-600">
+                <div v-for="(error, idx) in validationResult.errors" :key="idx" class="break-all">
+                  {{ error }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="validationResult.warnings && validationResult.warnings.length > 0" class="rounded-[20px] border border-yellow-200 bg-yellow-50 px-4 py-4">
+              <p class="text-sm font-medium text-yellow-700 mb-2">{{ $t('common.warnings') }}</p>
+              <div class="space-y-1 text-sm text-yellow-600">
+                <div v-for="(warning, idx) in validationResult.warnings" :key="idx" class="break-all">
+                  {{ warning }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 flex justify-end">
+            <button class="btn btn-secondary" @click="closeValidationResultModal">
+              {{ $t('common.close') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="showCaseEditModal"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="closeCaseEditModal"
+      >
         <div class="bg-white rounded-lg shadow-xl p-6 w-[92vw] max-w-2xl">
           <div class="flex items-start justify-between gap-4 mb-4">
             <div>
-              <h3 class="text-lg font-medium">编辑用例信息</h3>
+              <h3 class="text-lg font-medium">{{ $t('excelExecution.editCaseInfo') }}</h3>
               <p v-if="editingCaseExcelRow" class="text-sm text-gray-500 mt-1">
-                第 {{ editingCaseExcelRow }} 行，修改后会直接写回当前 Excel 文件。
+                {{ $t('excelExecution.editCaseRow', { row: editingCaseExcelRow }) }}
               </p>
             </div>
             <button @click="closeCaseEditModal" class="text-gray-500 hover:text-gray-700" :disabled="savingCaseFields">
@@ -454,58 +673,87 @@
 
           <div class="space-y-4">
             <div>
-              <label class="form-label">用例标题</label>
+              <label class="form-label">{{ $t('excelExecution.caseTitle') }}</label>
               <input
                 v-model="editingCaseForm.title"
                 type="text"
                 class="form-input w-full"
-                placeholder="请输入用例标题"
+                :placeholder="$t('excelExecution.caseTitlePlaceholder')"
               >
             </div>
             <div>
-              <label class="form-label">原始步骤</label>
+              <label class="form-label">{{ $t('excelExecution.originalSteps') }}</label>
               <textarea
                 v-model="editingCaseForm.ori_step"
                 class="form-input w-full min-h-[120px] resize-y"
-                placeholder="请输入 oriStep 内容，例如 HOME/1/1"
+                :placeholder="$t('excelExecution.originalStepsPlaceholder')"
               ></textarea>
             </div>
             <div>
-              <label class="form-label">前置脚本</label>
+              <label class="form-label">{{ $t('excelExecution.preScript') }}</label>
               <textarea
                 v-model="editingCaseForm.pre_script"
                 class="form-input w-full min-h-[120px] resize-y"
-                placeholder="请输入 preScript 内容，留空则不写入"
+                :placeholder="$t('excelExecution.preScriptPlaceholder')"
               ></textarea>
             </div>
             <div>
-              <label class="form-label">校验图片</label>
+              <label class="form-label">{{ $t('excelExecution.verifyImageField') }}</label>
               <input
                 v-model="editingCaseForm.verify_image"
                 type="text"
                 class="form-input w-full"
-                placeholder="请输入校验图片名称或路径"
+                :placeholder="$t('excelExecution.verifyImagePlaceholder')"
               >
             </div>
           </div>
 
           <div class="mt-6 flex justify-end gap-3">
             <button class="btn btn-secondary" @click="closeCaseEditModal" :disabled="savingCaseFields">
-              取消
+              {{ $t('common.cancel') }}
             </button>
             <button class="btn btn-primary" @click="saveCaseFields" :disabled="savingCaseFields">
-              {{ savingCaseFields ? '保存中...' : '保存修改' }}
+              {{ savingCaseFields ? $t('excelExecution.saving') : $t('common.saveChanges') }}
             </button>
           </div>
         </div>
       </div>
+
+      <input
+        ref="fileInput"
+        type="file"
+        class="hidden"
+        accept=".xlsx,.xls"
+        @change="uploadFile"
+      >
+      <input
+        ref="modelFolderInput"
+        type="file"
+        class="hidden"
+        webkitdirectory
+        directory
+        multiple
+        @change="handleModelFolderChange"
+      >
     </div>
     </div>
+
+    <UploadExcelConfirmModal
+      :visible="uploadConfirmVisible"
+      @confirm="confirmUpload"
+      @cancel="cancelUpload"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { onBeforeRouteLeave } from 'vue-router'
+import UploadExcelConfirmModal from '../../components/UploadExcelConfirmModal.vue'
+import { useUploadExcelConfirm } from '../../composables/useUploadExcelConfirm.js'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const loadingStatus = ref(false)
 const statusErrorMessage = ref('')
@@ -546,6 +794,7 @@ const loadingAnalysis = ref(false)
 const deletingFile = ref(false)
 const executingRows = ref({})
 const stopExecutionFlags = ref({})
+const executionAbortControllers = ref({})
 const selectedRows = ref([])
 const searchKeyword = ref('')
 const currentPage = ref(1)
@@ -553,15 +802,18 @@ const jumpPage = ref(1)
 const pageSize = ref(20)
 const isBatchExecuting = ref(false)
 const executionResults = ref([])
-const executionLogContainer = ref(null)
-const analysisSection = ref(null)
 const rowRunMeta = ref({})
+const latestBatchReport = ref(null)
 const showCaseEditModal = ref(false)
+const showValidationResultModal = ref(false)
 const fileInput = ref(null)
 const modelFolderInput = ref(null)
+const fileSelectorPanelExpanded = ref(false)
+const modelSelectorPanelExpanded = ref(false)
 const importingModel = ref(false)
 const selectingModel = ref(false)
 const deletingModel = ref(false)
+const downloadingCohere = ref(false)
 const savingCaseFields = ref(false)
 const modelImportMessage = ref('')
 const modelImportProgress = reactive({
@@ -569,6 +821,16 @@ const modelImportProgress = reactive({
   total: 0,
   modelName: ''
 })
+const audioInputMode = ref('speaker')
+const audioDeviceIndex = ref(null)
+const audioDevices = ref([])
+const loadingAudioDevices = ref(false)
+const savingAudioConfig = ref(false)
+const showExecutionSettings = ref(false)
+const executionMode = ref('single')
+const enableRecording = ref(true)
+const enableVerification = ref(true)
+const matchThreshold = ref(0.85)
 const editingCaseIndex = ref(null)
 const editingCaseExcelRow = ref(null)
 const editingCaseForm = reactive({
@@ -582,6 +844,11 @@ const activeModelName = computed(() => status.active_model?.name || '')
 const asrDependencyStatus = computed(() => status.dependencies || {})
 const missingAsrDependencies = computed(() => Array.isArray(asrDependencyStatus.value.missing) ? asrDependencyStatus.value.missing : [])
 const canExecuteAsr = computed(() => Boolean(activeModelName.value && selectedDevice.value && missingAsrDependencies.value.length === 0))
+const hasAnalyzedCurrentFile = computed(() => Boolean(selectedFile.value && (validationResult.value || excelAnalysis.value)))
+const shouldCollapseFileSelectorPanel = computed(() => Boolean(selectedFile.value && (hasAnalyzedCurrentFile.value || activeModelName.value)))
+const shouldCollapseModelSelectorPanel = computed(() => Boolean(selectedFile.value && activeModelName.value))
+const showCompactFileSelectorPanel = computed(() => shouldCollapseFileSelectorPanel.value && !fileSelectorPanelExpanded.value)
+const showCompactModelSelectorPanel = computed(() => shouldCollapseModelSelectorPanel.value && !modelSelectorPanelExpanded.value)
 const asrDependencyBlockMessage = computed(() => {
   if (missingAsrDependencies.value.length === 0) {
     return ''
@@ -590,8 +857,8 @@ const asrDependencyBlockMessage = computed(() => {
   const commands = Array.isArray(asrDependencyStatus.value.install_commands)
     ? asrDependencyStatus.value.install_commands
     : []
-  const commandText = commands.length ? `\n\n建议执行：\n${commands.join('\n')}` : ''
-  return `当前后端缺少 ASR 运行依赖：${missingAsrDependencies.value.join('、')}。请先按页面顶部提示安装依赖，重启后端后点击“刷新状态”。${commandText}`
+  const commandText = commands.length ? `\n\n${t('excelAsr.handlingSteps')}\n${commands.join('\n')}` : ''
+  return `${t('excelAsr.dependencyWarning')} ${t('excelAsr.missingDependencies', { dependencies: missingAsrDependencies.value.join(', ') })}${commandText}`
 })
 
 const filteredRows = computed(() => {
@@ -630,6 +897,7 @@ const pagedRows = computed(() => {
 })
 
 const hasActiveExecution = computed(() => Object.values(executingRows.value).some(Boolean))
+const hasExecutionInProgress = computed(() => isBatchExecuting.value || hasActiveExecution.value)
 
 const isPageAllSelected = computed(() => {
   if (pagedRows.value.length === 0) {
@@ -640,20 +908,6 @@ const isPageAllSelected = computed(() => {
   return ids.every((id) => selectedRows.value.includes(id))
 })
 
-const executionLogStats = computed(() => {
-  return executionResults.value.reduce((stats, result) => {
-    const statusKey = result?.status || 'info'
-    if (statusKey === 'success') {
-      stats.success += 1
-    } else if (statusKey === 'error') {
-      stats.error += 1
-    } else {
-      stats.info += 1
-    }
-    return stats
-  }, { info: 0, success: 0, error: 0 })
-})
-
 const readErrorMessage = async (response, fallbackMessage) => {
   try {
     const data = await response.json()
@@ -661,6 +915,45 @@ const readErrorMessage = async (response, fallbackMessage) => {
   } catch {
     return fallbackMessage
   }
+}
+
+const isAbortError = (error) => {
+  if (!error) {
+    return false
+  }
+
+  const message = String(error.message || error || '').toLowerCase()
+  return error.name === 'AbortError' || message.includes('abort') || message.includes('aborted')
+}
+
+const clearExecutionAbortController = (index) => {
+  if (!executionAbortControllers.value[index]) {
+    return
+  }
+
+  delete executionAbortControllers.value[index]
+  executionAbortControllers.value = { ...executionAbortControllers.value }
+}
+
+const abortExecution = (index) => {
+  const controller = executionAbortControllers.value[index]
+  if (controller && !controller.signal.aborted) {
+    controller.abort()
+  }
+}
+
+const confirmStopExecutionBeforeLeave = () => {
+  if (!hasExecutionInProgress.value) {
+    return true
+  }
+
+  const confirmed = confirm(t('excelAsr.alerts.leaveWhileExecutingConfirm'))
+  if (!confirmed) {
+    return false
+  }
+
+  stopAllExecution()
+  return true
 }
 
 const inferFolderName = (files) => {
@@ -750,17 +1043,219 @@ const loadStatus = async () => {
   try {
     const response = await fetch('/api/excel/asr/status')
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, `请求失败: ${response.status}`))
+      throw new Error(await readErrorMessage(response, `${t('excelAsr.alerts.loadStatusFailed')}: ${response.status}`))
     }
 
     const data = await response.json()
     Object.assign(status, data)
   } catch (error) {
     console.error('加载 ASR 状态失败:', error)
-    statusErrorMessage.value = error instanceof Error ? error.message : '加载 ASR 状态失败'
+    statusErrorMessage.value = error instanceof Error ? error.message : t('excelAsr.alerts.loadStatusFailed')
   } finally {
     loadingStatus.value = false
   }
+}
+
+const loadAudioDevices = async () => {
+  loadingAudioDevices.value = true
+  try {
+    const response = await fetch('/api/excel/asr/audio-devices')
+    if (!response.ok) throw new Error('获取音频设备列表失败')
+    const data = await response.json()
+    audioDevices.value = data.devices || []
+  } catch (error) {
+    console.error('获取音频设备列表失败:', error)
+    audioDevices.value = []
+  } finally {
+    loadingAudioDevices.value = false
+  }
+}
+
+const loadAudioConfig = async () => {
+  try {
+    const response = await fetch('/api/excel/asr/audio-config')
+    if (!response.ok) throw new Error('获取音频配置失败')
+    const data = await response.json()
+    audioInputMode.value = data.audio_input_mode || 'speaker'
+    audioDeviceIndex.value = data.audio_device_index ?? null
+  } catch (error) {
+    console.error('获取音频配置失败:', error)
+  }
+}
+
+const saveAudioConfig = async () => {
+  savingAudioConfig.value = true
+  try {
+    const response = await fetch('/api/excel/asr/audio-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audio_input_mode: audioInputMode.value,
+        audio_device_index: audioDeviceIndex.value,
+      }),
+    })
+    if (!response.ok) throw new Error('保存音频配置失败')
+  } catch (error) {
+    console.error('保存音频配置失败:', error)
+  } finally {
+    savingAudioConfig.value = false
+  }
+}
+
+const onAudioModeChange = async (mode) => {
+  audioInputMode.value = mode
+  audioDeviceIndex.value = null
+  await saveAudioConfig()
+}
+
+const onAudioDeviceChange = async (index) => {
+  audioDeviceIndex.value = index === '' ? null : Number(index)
+  await saveAudioConfig()
+}
+
+// 指令动效：解析命令为 token 列表
+const parseCommandToken = (raw, index) => {
+  if (!raw || String(raw).trim().toLowerCase() === 'nan') return null
+  const parts = String(raw).trim().split('/')
+  const key = (parts[0] || '').trim().toUpperCase()
+  if (!key) return null
+  const repeat = parseInt(parts[1]) || 1
+  const delay = parseFloat(parts[2]) || 0
+  const meta = []
+  if (repeat > 1) meta.push(`x${repeat}`)
+  if (delay > 0) meta.push(`${delay}s`)
+  return { id: `cmd-${index}`, raw: String(raw).trim(), key, repeat, delay, meta: meta.join(' / '), index }
+}
+
+const getRowCommandTokens = (row) => {
+  const commands = row?.commands || []
+  return commands.map((cmd, i) => parseCommandToken(cmd, i)).filter(Boolean)
+}
+
+// 指令动效：跟踪当前执行到哪条指令 + 重复次数 + 耗时
+const rowActiveCommandIndex = ref({})
+const rowCommandProgress = ref({})  // { [rowIndex]: { repeat: '1/8', elapsed: '0.3s' } }
+
+const isCommandActive = (rowIndex, cmd) => {
+  const activeIdx = rowActiveCommandIndex.value[rowIndex]
+  return activeIdx !== undefined && cmd.index === activeIdx
+}
+
+const getCommandProgress = (rowIndex, cmd) => {
+  if (!isCommandActive(rowIndex, cmd)) return ''
+  const progress = rowCommandProgress.value[rowIndex]
+  if (!progress?.repeat) return '...'
+  return progress.repeat
+}
+
+// 从 SSE 消息中解析指令进度
+const parseCommandProgressFromMessage = (message) => {
+  if (typeof message !== 'string') return null
+  // 匹配 "✓ DOWN (1/8) 发送成功 (耗时199ms)" 或 "✓ DOWN 发送成功 (耗时199ms)"
+  const match = message.match(/^✓\s+(\S+?)(?:\s+\((\d+)\/(\d+)\))?\s+发送成功\s+\(耗时(\d+)ms\)/)
+  if (!match) return null
+  return {
+    key: match[1].trim().toUpperCase(),
+    current: match[2] ? parseInt(match[2]) : null,
+    total: match[3] ? parseInt(match[3]) : null,
+    isLastRepeat: match[2] && match[3] ? parseInt(match[2]) === parseInt(match[3]) : true,
+  }
+}
+
+const buildAsrExecutionLogEntry = (statusKey, message, rowIndex = null) => {
+  return {
+    status: statusKey,
+    message,
+    row_index: Number.isInteger(rowIndex) ? rowIndex : null,
+    happened_at: new Date().toISOString()
+  }
+}
+
+const appendExecutionLog = (statusKey, message, rowIndex = null) => {
+  executionResults.value.push({
+    ...buildAsrExecutionLogEntry(statusKey, message, rowIndex)
+  })
+}
+
+const getBatchReportTitle = () => {
+  const fileName = selectedFile.value || 'ASR'
+  const baseName = fileName.replace(/\.[^.]+$/, '')
+  return `${baseName}报告`
+}
+
+const buildAsrBatchReportRows = (rowIndexes) => {
+  const validRows = excelAnalysis.value?.valid_rows || []
+  return rowIndexes.map((rowIndex) => {
+    const row = validRows[rowIndex - 1] || {}
+    const meta = rowRunMeta.value[rowIndex] || {}
+    const score = Number.isFinite(meta.asr_score) ? meta.asr_score : null
+    return {
+      row_index: rowIndex,
+      case_title: row.title || t('excelExecution.rowFallbackTitle', { row: rowIndex }),
+      asr_result: meta.asr_result || '',
+      asr_score: score,
+      transcribed_text: meta.transcribed_text || '',
+      tts_text: meta.tts_text || '',
+      reference_text: meta.reference_text || '',
+      reference_path: meta.reference_path || '',
+      audio_path: meta.audio_path || '',
+      transcript_path: meta.transcript_path || '',
+      compare_result_path: meta.compare_result_path || '',
+      note: meta.asr_result === 'NO_REF' ? t('excelAsr.noReference') : ''
+    }
+  })
+}
+
+const createAsrBatchReport = async (rowIndexes, label) => {
+  const rowResults = buildAsrBatchReportRows(rowIndexes)
+  if (rowResults.length === 0) {
+    return null
+  }
+
+  try {
+    const response = await fetch('/api/reports/asr-batch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: getBatchReportTitle(),
+        file_name: selectedFile.value || '',
+        label,
+        device: selectedDevice.value || '',
+        model_name: activeModelName.value || '',
+        row_results: rowResults,
+        execution_logs: executionResults.value.map((item) => ({
+          status: item.status,
+          message: item.message,
+          row_index: Number.isInteger(item.row_index) ? item.row_index : null,
+          happened_at: item.happened_at || ''
+        }))
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.reportGenerateFailed')))
+    }
+
+    const data = await response.json()
+    latestBatchReport.value = data.report || null
+    if (latestBatchReport.value?.title) {
+      appendExecutionLog('success', t('excelAsr.alerts.reportGenerated', { title: latestBatchReport.value.title }))
+    }
+    return latestBatchReport.value
+  } catch (error) {
+    appendExecutionLog('error', error instanceof Error ? error.message : t('excelAsr.alerts.reportGenerateFailed'))
+    return null
+  }
+}
+
+const openLatestBatchReport = () => {
+  if (!latestBatchReport.value?.report_url) {
+    return
+  }
+
+  window.open(latestBatchReport.value.report_url, '_blank', 'noopener')
 }
 
 const triggerModelFolderPicker = () => {
@@ -779,7 +1274,7 @@ const handleModelFolderChange = async (event) => {
 
   const modelName = inferFolderName(files)
   if (!modelName) {
-    alert('无法识别模型目录名称')
+    alert(t('excelAsr.alerts.unknownModelFolder'))
     return
   }
 
@@ -802,18 +1297,22 @@ const handleModelFolderChange = async (event) => {
       })
 
       if (!response.ok) {
-        throw new Error(await readErrorMessage(response, `导入模型文件失败: ${file.name}`))
+        throw new Error(await readErrorMessage(response, t('excelAsr.alerts.importModelFileFailed', { name: file.name })))
       }
 
       modelImportProgress.completed += 1
-      modelImportMessage.value = `正在导入模型 ${modelName}：${modelImportProgress.completed}/${modelImportProgress.total}`
+      modelImportMessage.value = t('excelAsr.alerts.importProgress', {
+        model: modelName,
+        completed: modelImportProgress.completed,
+        total: modelImportProgress.total
+      })
     }
 
     await loadStatus()
-    modelImportMessage.value = `模型 ${modelName} 导入完成，当前可在列表中切换。`
+    modelImportMessage.value = t('excelAsr.alerts.importComplete', { model: modelName })
   } catch (error) {
     console.error('导入模型失败:', error)
-    modelImportMessage.value = error instanceof Error ? error.message : '导入模型失败'
+    modelImportMessage.value = error instanceof Error ? error.message : t('excelAsr.alerts.importFailed')
   } finally {
     importingModel.value = false
   }
@@ -831,20 +1330,67 @@ const selectModel = async (modelName) => {
     })
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, '切换模型失败'))
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.switchModelFailed')))
     }
 
     await loadStatus()
   } catch (error) {
     console.error('切换模型失败:', error)
-    alert(error instanceof Error ? error.message : '切换模型失败')
+    alert(error instanceof Error ? error.message : t('excelAsr.alerts.switchModelFailed'))
   } finally {
     selectingModel.value = false
   }
 }
 
+const formatBackendKindLabel = (kind) => {
+  if (!kind) {
+    return ''
+  }
+
+  const normalized = String(kind).toLowerCase()
+  if (normalized === 'cohere') {
+    return t('excelAsr.backendCohere')
+  }
+
+  if (normalized === 'qwen') {
+    return t('excelAsr.backendQwen')
+  }
+
+  return ''
+}
+
+const downloadCohereTranscribe = async () => {
+  if (downloadingCohere.value) {
+    return
+  }
+
+  downloadingCohere.value = true
+  modelImportMessage.value = t('excelAsr.alerts.downloadCohereStart')
+
+  try {
+    const response = await fetch('/api/excel/asr/models/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    })
+
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.downloadCohereFailed')))
+    }
+
+    const data = await response.json()
+    await loadStatus()
+    modelImportMessage.value = t('excelAsr.alerts.downloadCohereSuccess', { model: data.model_name })
+  } catch (error) {
+    console.error('下载 Cohere Transcribe 失败:', error)
+    modelImportMessage.value = error instanceof Error ? error.message : t('excelAsr.alerts.downloadCohereFailed')
+  } finally {
+    downloadingCohere.value = false
+  }
+}
+
 const deleteModel = async (modelName) => {
-  if (!confirm(`确定要删除模型 ${modelName} 吗？`)) {
+  if (!confirm(t('excelAsr.alerts.deleteModelConfirm', { name: modelName }))) {
     return
   }
 
@@ -855,20 +1401,23 @@ const deleteModel = async (modelName) => {
     })
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, '删除模型失败'))
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.deleteModelFailed')))
     }
 
     const data = await response.json()
     await loadStatus()
 
     if (data.active_model) {
-      modelImportMessage.value = `模型 ${data.deleted_model} 已删除，当前模型已切换为 ${data.active_model}。`
+      modelImportMessage.value = t('excelAsr.alerts.deleteModelSuccessWithActive', {
+        deleted: data.deleted_model,
+        active: data.active_model
+      })
     } else {
-      modelImportMessage.value = `模型 ${data.deleted_model} 已删除。`
+      modelImportMessage.value = t('excelAsr.alerts.deleteModelSuccess', { deleted: data.deleted_model })
     }
   } catch (error) {
     console.error('删除模型失败:', error)
-    alert(error instanceof Error ? error.message : '删除模型失败')
+    alert(error instanceof Error ? error.message : t('excelAsr.alerts.deleteModelFailed'))
   } finally {
     deletingModel.value = false
   }
@@ -891,6 +1440,7 @@ const selectFile = (file) => {
   selectedFile.value = file
   excelAnalysis.value = null
   validationResult.value = null
+  showValidationResultModal.value = false
   selectedRows.value = []
   currentPage.value = 1
   jumpPage.value = 1
@@ -942,7 +1492,7 @@ const saveCaseFields = async () => {
     })
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, '更新用例字段失败'))
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.updateCaseFailedSimple')))
     }
 
     const rowData = excelAnalysis.value?.valid_rows?.[editingCaseIndex.value - 1]
@@ -960,7 +1510,7 @@ const saveCaseFields = async () => {
     closeCaseEditModal()
   } catch (error) {
     console.error('更新用例字段失败:', error)
-    alert('更新用例字段失败: ' + error.message)
+    alert(t('excelAsr.alerts.updateCaseFailed', { detail: error.message }))
   } finally {
     savingCaseFields.value = false
   }
@@ -968,22 +1518,24 @@ const saveCaseFields = async () => {
 
 const analyzeFile = async () => {
   if (!selectedFile.value) {
-    alert('请先选择一个 Excel 文件')
+    alert(t('excelAsr.alerts.selectFileFirst'))
     return
   }
 
   loadingAnalysis.value = true
+  showValidationResultModal.value = false
   try {
     const validateResponse = await fetch(`/api/excel/validate?file_name=${encodeURIComponent(selectedFile.value)}`)
     if (!validateResponse.ok) {
-      throw new Error(await readErrorMessage(validateResponse, '验证文件失败'))
+      throw new Error(await readErrorMessage(validateResponse, t('excelAsr.alerts.validateFailed')))
     }
 
     validationResult.value = await validateResponse.json()
+    openValidationResultModal()
 
     const response = await fetch(`/api/excel/analyze?file_name=${encodeURIComponent(selectedFile.value)}`)
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, '分析文件失败'))
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.analyzeFailed')))
     }
 
     excelAnalysis.value = await response.json()
@@ -992,19 +1544,43 @@ const analyzeFile = async () => {
     currentPage.value = 1
     jumpPage.value = 1
     rowRunMeta.value = {}
-
-    await nextTick()
-    analysisSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   } catch (error) {
     console.error('分析文件失败:', error)
-    alert(error instanceof Error ? error.message : '分析文件失败')
+    alert(error instanceof Error ? error.message : t('excelAsr.alerts.analyzeFailed'))
   } finally {
     loadingAnalysis.value = false
   }
 }
 
+const {
+  uploadConfirmVisible,
+  requestUpload: requestUploadExcelConfirm,
+  confirmUpload,
+  cancelUpload,
+} = useUploadExcelConfirm()
+
 const triggerExcelUpload = () => {
-  fileInput.value?.click()
+  requestUploadExcelConfirm(() => {
+    fileInput.value?.click()
+  })
+}
+
+const openValidationResultModal = () => {
+  if (validationResult.value) {
+    showValidationResultModal.value = true
+  }
+}
+
+const closeValidationResultModal = () => {
+  showValidationResultModal.value = false
+}
+
+const expandFileSelectorPanel = () => {
+  fileSelectorPanelExpanded.value = true
+}
+
+const expandModelSelectorPanel = () => {
+  modelSelectorPanelExpanded.value = true
 }
 
 const uploadFile = async (event) => {
@@ -1023,7 +1599,7 @@ const uploadFile = async (event) => {
     })
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, '上传文件失败'))
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.uploadFailed')))
     }
 
     const data = await response.json()
@@ -1031,7 +1607,7 @@ const uploadFile = async (event) => {
     selectFile(data.filename)
   } catch (error) {
     console.error('上传文件失败:', error)
-    alert(error instanceof Error ? error.message : '上传文件失败')
+    alert(error instanceof Error ? error.message : t('excelAsr.alerts.uploadFailed'))
   } finally {
     if (fileInput.value) {
       fileInput.value.value = ''
@@ -1040,7 +1616,7 @@ const uploadFile = async (event) => {
 }
 
 const deleteFile = async (file) => {
-  if (!confirm(`确定要删除文件 ${file} 吗？`)) {
+  if (!confirm(t('excelAsr.alerts.deleteFileConfirm', { file }))) {
     return
   }
 
@@ -1051,7 +1627,7 @@ const deleteFile = async (file) => {
     })
 
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, '删除文件失败'))
+      throw new Error(await readErrorMessage(response, t('excelAsr.alerts.deleteFileFailed')))
     }
 
     await loadExcelFiles()
@@ -1059,12 +1635,13 @@ const deleteFile = async (file) => {
       selectedFile.value = ''
       excelAnalysis.value = null
       validationResult.value = null
+      showValidationResultModal.value = false
       executionResults.value = []
       rowRunMeta.value = {}
     }
   } catch (error) {
     console.error('删除文件失败:', error)
-    alert(error instanceof Error ? error.message : '删除文件失败')
+    alert(error instanceof Error ? error.message : t('excelAsr.alerts.deleteFileFailed'))
   } finally {
     deletingFile.value = false
   }
@@ -1073,19 +1650,19 @@ const deleteFile = async (file) => {
 const executeAsrRowByIndex = (index) => {
   return new Promise((resolve) => {
     if (!selectedFile.value) {
-      alert('请先选择一个 Excel 文件')
+      alert(t('excelAsr.alerts.selectFileFirst'))
       resolve()
       return
     }
 
     if (!activeModelName.value) {
-      alert('请先导入并选择一个 ASR 模型')
+      alert(t('excelAsr.alerts.selectModelFirst'))
       resolve()
       return
     }
 
     if (!selectedDevice.value) {
-      alert('请先选择设备')
+      alert(t('excelAsr.alerts.selectDeviceFirst'))
       resolve()
       return
     }
@@ -1099,8 +1676,33 @@ const executeAsrRowByIndex = (index) => {
     executingRows.value[index] = true
     stopExecutionFlags.value[index] = false
     rowRunMeta.value[index] = {}
+    rowActiveCommandIndex.value = { ...rowActiveCommandIndex.value, [index]: 0 }
+    const abortController = new AbortController()
+    executionAbortControllers.value[index] = abortController
     if (!isBatchExecuting.value) {
       executionResults.value = []
+    }
+
+    let stopReported = false
+    const reportStopped = () => {
+      if (stopReported) {
+        return
+      }
+
+      stopReported = true
+      appendExecutionLog('error', t('excelAsr.alerts.executionStopped'), index)
+    }
+
+    const finishExecution = () => {
+      executingRows.value[index] = false
+      const nextCmd = { ...rowActiveCommandIndex.value }
+      delete nextCmd[index]
+      rowActiveCommandIndex.value = nextCmd
+      const nextProg = { ...rowCommandProgress.value }
+      delete nextProg[index]
+      rowCommandProgress.value = nextProg
+      clearExecutionAbortController(index)
+      resolve()
     }
 
     fetch('/api/excel/asr/execute', {
@@ -1108,6 +1710,7 @@ const executeAsrRowByIndex = (index) => {
       headers: {
         'Content-Type': 'application/json'
       },
+      signal: abortController.signal,
       body: JSON.stringify({
         file_name: selectedFile.value,
         row_index: index
@@ -1115,7 +1718,7 @@ const executeAsrRowByIndex = (index) => {
     })
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '执行 ASR 用例失败'))
+          throw new Error(await readErrorMessage(response, t('excelAsr.alerts.executeFailed')))
         }
 
         const reader = response.body.getReader()
@@ -1123,21 +1726,16 @@ const executeAsrRowByIndex = (index) => {
         let buffer = ''
 
         const readChunk = () => {
-          if (stopExecutionFlags.value[index]) {
+          if (stopExecutionFlags.value[index] || abortController.signal.aborted) {
             reader.cancel()
-            executingRows.value[index] = false
-            executionResults.value.push({
-              status: 'error',
-              message: '执行已停止'
-            })
-            resolve()
+            reportStopped()
+            finishExecution()
             return
           }
 
-          reader.read().then(({ done, value }) => {
+          reader.read().then(async ({ done, value }) => {
             if (done) {
-              executingRows.value[index] = false
-              resolve()
+              finishExecution()
               return
             }
 
@@ -1157,13 +1755,58 @@ const executeAsrRowByIndex = (index) => {
 
               try {
                 const result = JSON.parse(rawData)
-                executionResults.value.push(result)
+                executionResults.value.push({
+                  ...result,
+                  row_index: index,
+                  happened_at: new Date().toISOString()
+                })
+
+                // 根据 SSE 事件跟踪当前执行的指令
+                const msg = result.message || ''
+                const progressInfo = parseCommandProgressFromMessage(msg)
+                if (progressInfo) {
+                  const row = excelAnalysis.value?.valid_rows?.[index - 1]
+                  const tokens = getRowCommandTokens(row || { commands: [] })
+                  const currentActiveIdx = rowActiveCommandIndex.value[index] ?? 0
+
+                  // 从当前活跃位置开始查找匹配的指令（避免匹配到同名的前一条）
+                  let found = null
+                  for (let i = currentActiveIdx; i < tokens.length; i++) {
+                    if (tokens[i].key === progressInfo.key) {
+                      found = tokens[i]
+                      break
+                    }
+                  }
+                  // 如果从当前位置找不到，从头找（容错）
+                  if (!found) {
+                    found = tokens.find(t => t.key === progressInfo.key)
+                  }
+
+                  if (found) {
+                    // 如果是重复指令的最后一次，移动到下一条
+                    if (progressInfo.isLastRepeat && found.index === currentActiveIdx) {
+                      const nextIdx = found.index + 1
+                      if (nextIdx < tokens.length) {
+                        rowActiveCommandIndex.value = { ...rowActiveCommandIndex.value, [index]: nextIdx }
+                        rowCommandProgress.value = { ...rowCommandProgress.value, [index]: { repeat: '' } }
+                      }
+                    } else {
+                      rowActiveCommandIndex.value = { ...rowActiveCommandIndex.value, [index]: found.index }
+                      const repeat = (progressInfo.current && progressInfo.total) ? `${progressInfo.current}/${progressInfo.total}` : ''
+                      rowCommandProgress.value = { ...rowCommandProgress.value, [index]: { repeat } }
+                    }
+                  }
+                }
                 if (
                   Object.prototype.hasOwnProperty.call(result, 'asr_result') ||
                   Object.prototype.hasOwnProperty.call(result, 'asr_score') ||
                   Object.prototype.hasOwnProperty.call(result, 'tts_text') ||
                   Object.prototype.hasOwnProperty.call(result, 'transcribed_text') ||
-                  Object.prototype.hasOwnProperty.call(result, 'reference_text')
+                  Object.prototype.hasOwnProperty.call(result, 'reference_text') ||
+                  Object.prototype.hasOwnProperty.call(result, 'reference_path') ||
+                  Object.prototype.hasOwnProperty.call(result, 'audio_path') ||
+                  Object.prototype.hasOwnProperty.call(result, 'transcript_path') ||
+                  Object.prototype.hasOwnProperty.call(result, 'compare_result_path')
                 ) {
                   const previousMeta = rowRunMeta.value[index] || {}
                   rowRunMeta.value[index] = {
@@ -1172,7 +1815,11 @@ const executeAsrRowByIndex = (index) => {
                     asr_score: Object.prototype.hasOwnProperty.call(result, 'asr_score') ? result.asr_score : previousMeta.asr_score,
                     tts_text: Object.prototype.hasOwnProperty.call(result, 'tts_text') ? (result.tts_text || '') : (previousMeta.tts_text || ''),
                     transcribed_text: Object.prototype.hasOwnProperty.call(result, 'transcribed_text') ? (result.transcribed_text || '') : (previousMeta.transcribed_text || ''),
-                    reference_text: Object.prototype.hasOwnProperty.call(result, 'reference_text') ? (result.reference_text || '') : (previousMeta.reference_text || '')
+                    reference_text: Object.prototype.hasOwnProperty.call(result, 'reference_text') ? (result.reference_text || '') : (previousMeta.reference_text || ''),
+                    reference_path: Object.prototype.hasOwnProperty.call(result, 'reference_path') ? (result.reference_path || '') : (previousMeta.reference_path || ''),
+                    audio_path: Object.prototype.hasOwnProperty.call(result, 'audio_path') ? (result.audio_path || '') : (previousMeta.audio_path || ''),
+                    transcript_path: Object.prototype.hasOwnProperty.call(result, 'transcript_path') ? (result.transcript_path || '') : (previousMeta.transcript_path || ''),
+                    compare_result_path: Object.prototype.hasOwnProperty.call(result, 'compare_result_path') ? (result.compare_result_path || '') : (previousMeta.compare_result_path || '')
                   }
                 }
               } catch (error) {
@@ -1182,32 +1829,37 @@ const executeAsrRowByIndex = (index) => {
 
             readChunk()
           }).catch((error) => {
+            if (stopExecutionFlags.value[index] || abortController.signal.aborted || isAbortError(error)) {
+              reportStopped()
+              finishExecution()
+              return
+            }
+
             console.error('读取执行流失败:', error)
-            executionResults.value.push({
-              status: 'error',
-              message: '执行失败：' + error.message
-            })
-            executingRows.value[index] = false
-            resolve()
+            appendExecutionLog('error', t('excelAsr.alerts.executionFailedWithDetail', { detail: error.message }), index)
+            finishExecution()
           })
         }
 
         readChunk()
       })
       .catch((error) => {
+        if (stopExecutionFlags.value[index] || abortController.signal.aborted || isAbortError(error)) {
+          reportStopped()
+          finishExecution()
+          return
+        }
+
         console.error('执行 ASR 用例失败:', error)
-        executionResults.value.push({
-          status: 'error',
-          message: error instanceof Error ? error.message : '执行 ASR 用例失败'
-        })
-        executingRows.value[index] = false
-        resolve()
+        appendExecutionLog('error', error instanceof Error ? error.message : t('excelAsr.alerts.executeFailed'), index)
+        finishExecution()
       })
   })
 }
 
 const stopExecution = (index) => {
   stopExecutionFlags.value[index] = true
+  abortExecution(index)
 }
 
 const toggleSelectRow = (rowIndex) => {
@@ -1231,11 +1883,11 @@ const toggleSelectAll = () => {
 }
 
 const executeSelectedRows = async () => {
-  await executeBatchRows(selectedRows.value, '已选用例')
+  await executeBatchRows(selectedRows.value, t('excelAsr.selectedCasesLabel'))
 }
 
 const executeAllRows = async () => {
-  await executeBatchRows(allRowIndexes.value, '当前 Excel 全部用例')
+  await executeBatchRows(allRowIndexes.value, t('excelAsr.allCasesLabel'))
 }
 
 const executeBatchRows = async (rowIndexes, label) => {
@@ -1244,11 +1896,9 @@ const executeBatchRows = async (rowIndexes, label) => {
     return
   }
 
+  latestBatchReport.value = null
   isBatchExecuting.value = true
-  executionResults.value.push({
-    status: 'info',
-    message: `开始批量执行${label}，共 ${orderedRows.length} 条`
-  })
+  appendExecutionLog('info', t('excelAsr.alerts.batchStart', { label, count: orderedRows.length }))
 
   let completedAll = false
   try {
@@ -1270,10 +1920,8 @@ const executeBatchRows = async (rowIndexes, label) => {
   } finally {
     isBatchExecuting.value = false
     if (completedAll) {
-      executionResults.value.push({
-        status: 'success',
-        message: `批量执行${label}完成，共执行 ${orderedRows.length} 条`
-      })
+      appendExecutionLog('success', t('excelAsr.alerts.batchComplete', { label, count: orderedRows.length }))
+      await createAsrBatchReport(orderedRows, label)
     }
   }
 }
@@ -1283,22 +1931,29 @@ const stopAllExecution = () => {
   for (const rowIndex in executingRows.value) {
     if (executingRows.value[rowIndex]) {
       stopExecutionFlags.value[rowIndex] = true
+      abortExecution(rowIndex)
     }
   }
-  executionResults.value.push({
-    status: 'info',
-    message: '所有执行已停止'
-  })
+  appendExecutionLog('info', t('excelAsr.alerts.allStopped'))
 }
+
+onBeforeRouteLeave((to, from, next) => {
+  if (!confirmStopExecutionBeforeLeave()) {
+    next(false)
+    return
+  }
+
+  next()
+})
 
 const executionStatusLabel = (statusKey) => {
   if (statusKey === 'success') {
-    return 'SUCCESS'
+    return t('common.success')
   }
   if (statusKey === 'error') {
-    return 'ERROR'
+    return t('common.error')
   }
-  return 'INFO'
+  return t('common.info')
 }
 
 const formatAsrScore = (score) => {
@@ -1319,10 +1974,6 @@ const getAsrResultBadgeClass = (result) => {
     return 'bg-amber-100 text-amber-700'
   }
   return 'bg-slate-100 text-slate-600'
-}
-
-const clearExecutionLogs = () => {
-  executionResults.value = []
 }
 
 const handlePrevPage = () => {
@@ -1347,17 +1998,6 @@ const handleJumpPage = () => {
   }
 }
 
-watch(() => executionResults.value.length, async (newLength, oldLength = 0) => {
-  if (newLength === 0 || newLength <= oldLength) {
-    return
-  }
-
-  await nextTick()
-  if (executionLogContainer.value) {
-    executionLogContainer.value.scrollTop = executionLogContainer.value.scrollHeight
-  }
-})
-
 watch(currentPage, (newPage) => {
   jumpPage.value = newPage
 })
@@ -1368,9 +2008,71 @@ watch(totalPages, (nextTotalPages) => {
   }
 })
 
+watch(selectedFile, (nextFile, previousFile) => {
+  if (!nextFile) {
+    fileSelectorPanelExpanded.value = false
+    modelSelectorPanelExpanded.value = false
+    return
+  }
+
+  if (activeModelName.value && nextFile !== previousFile) {
+    fileSelectorPanelExpanded.value = false
+    modelSelectorPanelExpanded.value = false
+  }
+})
+
+watch(activeModelName, (nextModel, previousModel) => {
+  if (!nextModel) {
+    modelSelectorPanelExpanded.value = false
+    return
+  }
+
+  if (selectedFile.value && nextModel !== previousModel) {
+    modelSelectorPanelExpanded.value = false
+    if (hasAnalyzedCurrentFile.value) {
+      fileSelectorPanelExpanded.value = false
+    }
+  }
+})
+
+const ASR_STATE_KEY = 'checkpilot.asrExecution.state'
+
+const restoreAsrState = () => {
+  try {
+    const saved = localStorage.getItem(ASR_STATE_KEY)
+    if (!saved) return
+    const state = JSON.parse(saved)
+    if (state.executionMode) executionMode.value = state.executionMode
+    if (typeof state.enableRecording === 'boolean') enableRecording.value = state.enableRecording
+    if (typeof state.enableVerification === 'boolean') enableVerification.value = state.enableVerification
+    if (typeof state.matchThreshold === 'number') matchThreshold.value = state.matchThreshold
+  } catch {}
+}
+
+const persistAsrState = () => {
+  try {
+    localStorage.setItem(ASR_STATE_KEY, JSON.stringify({
+      executionMode: executionMode.value,
+      enableRecording: enableRecording.value,
+      enableVerification: enableVerification.value,
+      matchThreshold: matchThreshold.value,
+    }))
+  } catch {}
+}
+
+watch([executionMode, enableRecording, enableVerification, matchThreshold], persistAsrState, { deep: true })
+
 onMounted(async () => {
+  restoreAsrState()
   await loadCurrentDevice()
-  await Promise.all([loadStatus(), loadExcelFiles()])
+  await Promise.all([loadStatus(), loadExcelFiles(), loadAudioDevices(), loadAudioConfig()])
+})
+
+onUnmounted(() => {
+  isBatchExecuting.value = false
+  Object.keys(executionAbortControllers.value).forEach((key) => {
+    abortExecution(key)
+  })
 })
 </script>
 
@@ -1385,7 +2087,7 @@ onMounted(async () => {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 24px 28px;
+  padding: 18px 20px;
   border: none;
   border-radius: 0;
   box-shadow: none;
@@ -1396,9 +2098,115 @@ onMounted(async () => {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 8px;
+  padding-right: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.9) rgba(226, 232, 240, 0.72);
+}
+
+.excel-file-panel,
+.excel-section-card,
+.excel-table-shell,
+.excel-note-card {
+  margin-bottom: 16px;
+}
+
+.excel-top-grid {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.excel-top-grid > * {
+  height: 100%;
+}
+
+.excel-top-compact-card {
+  padding: 14px 16px;
+}
+
+.excel-top-compact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.excel-top-compact-title {
+  margin: 6px 0 0;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.excel-top-compact-meta {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.excel-file-item {
+  padding: 0.75rem 0.875rem;
+}
+
+.excel-file-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.excel-section-card {
+  padding: 16px;
+  border-radius: 22px;
+}
+
+.excel-top-model-panel {
+  min-height: 100%;
+}
+
+.excel-step-chip {
+  padding: 0.45rem 0.7rem;
+  border-radius: 14px;
+  line-height: 1.35;
+}
+
+.excel-row-actions {
+  gap: 0.5rem;
+}
+
+.excel-results-table th,
+.excel-results-table td {
+  padding: 0.65rem 0.75rem;
+}
+
+.excel-results-table .excel-row-actions .btn {
+  min-width: 78px;
+}
+
+.excel-execution-page .btn {
+  padding: 0.5rem 0.8rem;
+  font-size: 0.875rem;
+  line-height: 1.2;
+}
+
+.excel-execution-page .btn.btn-sm,
+.excel-execution-page .btn-sm {
+  padding: 0.375rem 0.7rem;
+  font-size: 0.8125rem;
+}
+
+.excel-execution-page .form-input,
+.excel-execution-page .form-select {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.875rem;
+}
+
+.excel-execution-page .form-label {
+  margin-bottom: 0.25rem;
+  font-size: 0.8125rem;
 }
 
 .excel-execution-scroll::-webkit-scrollbar {
@@ -1415,5 +2223,129 @@ onMounted(async () => {
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.9);
   background-clip: padding-box;
+}
+
+@media (max-width: 768px) {
+  .excel-execution-page {
+    padding: 14px;
+  }
+
+  .excel-section-card {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .excel-results-table th,
+  .excel-results-table td {
+    padding: 0.55rem 0.6rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .excel-top-grid {
+    grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+  }
+}
+
+/* 指令动效（与图片执行一致） */
+.excel-step-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.excel-step-sequence-collapsed {
+  position: relative;
+  display: flex;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  overflow: hidden;
+  padding-right: 2.5rem;
+}
+
+.excel-step-sequence-collapsed::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2.75rem;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.98) 68%);
+  pointer-events: none;
+}
+
+.excel-step-sequence-collapsed .excel-step-command {
+  flex-shrink: 0;
+}
+
+.excel-step-command {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.96);
+  color: #475569;
+  line-height: 1.35;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.92);
+  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+.excel-step-command-key {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.excel-step-command-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.excel-step-command-progress {
+  border-radius: 999px;
+  background: rgba(191, 219, 254, 0.95);
+  padding: 0.15rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #1d4ed8;
+}
+
+.excel-step-command-active {
+  border-color: rgba(59, 130, 246, 0.34);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(14, 165, 233, 0.1));
+  color: #0f172a;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08), 0 10px 24px rgba(59, 130, 246, 0.16);
+  animation: excel-step-command-pulse 1.2s ease-in-out infinite;
+}
+
+.excel-step-command-active .excel-step-command-key {
+  color: #1d4ed8;
+}
+
+.excel-step-command-active .excel-step-command-meta {
+  color: #1e40af;
+}
+
+.excel-step-command-active .excel-step-command-progress {
+  background: #2563eb;
+  color: #fff;
+}
+
+@keyframes excel-step-command-pulse {
+  0% {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08), 0 10px 24px rgba(59, 130, 246, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16), 0 14px 30px rgba(59, 130, 246, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08), 0 10px 24px rgba(59, 130, 246, 0.12);
+  }
 }
 </style>

@@ -3,8 +3,10 @@ import sys
 import time
 import socket
 import threading
+import logging
 import webbrowser
 import uvicorn
+from datetime import datetime
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
@@ -12,6 +14,26 @@ if ROOT_DIR not in sys.path:
   sys.path.insert(0, ROOT_DIR)
 if BACKEND_DIR not in sys.path:
   sys.path.insert(0, BACKEND_DIR)
+
+# ---- 日志文件配置（在导入业务模块之前完成，确保所有 logger 都能写入文件） ----
+LOG_DIR = os.path.join(ROOT_DIR, "log")
+os.makedirs(LOG_DIR, exist_ok=True)
+_log_filename = datetime.now().strftime("ADBControl_%Y%m%d_%H%M%S.log")
+_log_filepath = os.path.join(LOG_DIR, _log_filename)
+
+_file_handler = logging.FileHandler(_log_filepath, encoding="utf-8")
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
+_console_handler = logging.StreamHandler(sys.stderr)
+_console_handler.setLevel(logging.INFO)
+_console_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
+logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handler])
+
+# uvicorn 的 access log 也写入同一文件
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 from backend.main import app as fastapi_app
 from backend.app.config import settings

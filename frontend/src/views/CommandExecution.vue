@@ -2,49 +2,49 @@
   <div class="card command-page">
     <div class="command-page-header">
       <div>
-        <h2 class="mb-2">命令执行</h2>
-        <p class="command-page-subtitle">直接发送 ADB 指令序列，命令说明和示例固定放在右侧，减少整页纵向占用。</p>
+        <h2 class="mb-2">{{ $t('commandExecution.title') }}</h2>
+        <p class="command-page-subtitle">{{ $t('commandExecution.subtitle') }}</p>
       </div>
     </div>
-    
+
     <div v-if="!selectedDevice" class="bg-yellow-50 p-4 rounded-lg mb-6">
-      <p class="text-warning mb-2">请先在设备管理页面选择一个ADB设备</p>
-      <router-link to="/devices" class="btn btn-primary">
-        前往设备管理
+      <p class="text-warning mb-2">{{ $t('common.deviceRequired') }}</p>
+      <router-link :to="{ path: '/', query: { panel: 'device-hub' } }" class="btn btn-primary">
+        {{ $t('common.goDeviceManagement') }}
       </router-link>
     </div>
-    
+
     <div v-else class="command-layout">
       <section class="command-main">
         <div class="form-group mb-0">
-          <label class="form-label" for="commandInput">命令序列</label>
-          <textarea 
-            id="commandInput" 
-            v-model="commandInput" 
-            class="form-input command-input" 
+          <label class="form-label" for="commandInput">{{ $t('commandExecution.commandSequence') }}</label>
+          <textarea
+            id="commandInput"
+            v-model="commandInput"
+            class="form-input command-input"
             rows="4"
-            placeholder="输入命令序列，格式为：KEYNAME/REPEAT/DELAY,KEYNAME/REPEAT/DELAY\n例如：OK/1/1,DOWN/1/1,UP/2/0.5"
+            :placeholder="$t('commandExecution.placeholder')"
           ></textarea>
         </div>
 
         <div class="command-actions">
-          <button 
-            @click="executeCommands" 
+          <button
+            @click="executeCommands"
             class="btn btn-primary"
             :disabled="!commandInput.trim() || executing"
           >
-            {{ executing ? '执行中...' : '执行命令' }}
+            {{ executing ? $t('commandExecution.running') : $t('commandExecution.executeCommands') }}
           </button>
           <button @click="clearInput" class="btn btn-secondary">
-            清空
+            {{ $t('common.clear') }}
           </button>
         </div>
 
         <div v-if="executionResults.length > 0" class="command-results">
-          <h3 class="font-medium mb-3">执行结果</h3>
+          <h3 class="font-medium mb-3">{{ $t('commandExecution.executionResults') }}</h3>
           <div class="border rounded-lg p-4 max-h-60 overflow-y-auto bg-white/80">
-            <div 
-              v-for="(result, index) in executionResults" 
+            <div
+              v-for="(result, index) in executionResults"
               :key="index"
               class="mb-2 pb-2 border-b last:border-b-0"
             >
@@ -58,38 +58,38 @@
 
       <aside class="command-side">
         <div class="command-panel">
-          <h3 class="font-medium mb-2">命令格式说明</h3>
+          <h3 class="font-medium mb-2">{{ $t('commandExecution.formatTitle') }}</h3>
           <p class="text-sm mb-2">
-            每条命令由三部分组成，用斜杠分隔：
+            {{ $t('commandExecution.formatIntro') }}
           </p>
           <ul class="list-disc pl-5 space-y-1 text-sm">
-            <li><strong>KEYNAME</strong>：按键名称（如 OK, HOME, UP, DOWN 等）</li>
-            <li><strong>REPEAT</strong>：执行次数（整数）</li>
-            <li><strong>DELAY</strong>：延迟时间（秒，支持小数）</li>
+            <li><strong>KEYNAME</strong>: {{ $t('commandExecution.keyName') }}</li>
+            <li><strong>REPEAT</strong>: {{ $t('commandExecution.repeat') }}</li>
+            <li><strong>DELAY</strong>: {{ $t('commandExecution.delay') }}</li>
           </ul>
           <p class="text-sm mt-2">
-            多条命令之间用逗号分隔。
+            {{ $t('commandExecution.formatOutro') }}
           </p>
         </div>
 
         <div class="command-panel command-panel-soft">
-          <h3 class="font-medium mb-2">示例命令</h3>
+          <h3 class="font-medium mb-2">{{ $t('commandExecution.examplesTitle') }}</h3>
           <div class="command-example-grid text-sm">
             <div class="bg-white p-2 rounded">
               <code>HOME/1/1,OK/1/1</code>
-              <p class="text-gray-600">返回主屏幕，然后按OK键</p>
+              <p class="text-gray-600">{{ $t('commandExecution.examples.first') }}</p>
             </div>
             <div class="bg-white p-2 rounded">
               <code>UP/3/0.5,DOWN/3/0.5</code>
-              <p class="text-gray-600">向上移动3次，每次延迟0.5秒，然后向下移动3次</p>
+              <p class="text-gray-600">{{ $t('commandExecution.examples.second') }}</p>
             </div>
             <div class="bg-white p-2 rounded">
               <code>LEFT/1/1,RIGHT/1/1,OK/1/1</code>
-              <p class="text-gray-600">向左移动，向右移动，然后按OK键</p>
+              <p class="text-gray-600">{{ $t('commandExecution.examples.third') }}</p>
             </div>
             <div class="bg-white p-2 rounded">
               <code>BACK/2/1, HOME/1/1</code>
-              <p class="text-gray-600">按BACK键2次，每次延迟1秒，然后返回主屏幕</p>
+              <p class="text-gray-600">{{ $t('commandExecution.examples.fourth') }}</p>
             </div>
           </div>
         </div>
@@ -99,13 +99,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onBeforeUnmount, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { onBeforeRouteLeave } from 'vue-router'
 
 // 状态管理
 const selectedDevice = ref('')
 const commandInput = ref('')
 const executionResults = ref([])
 const executing = ref(false)
+const executionRequestController = ref(null)
+const { t } = useI18n({ useScope: 'global' })
  
 
 // 加载当前设备
@@ -124,15 +128,91 @@ const loadCurrentDevice = async () => {
   }
 }
 
+const isAbortError = (error) => {
+  if (!error) {
+    return false
+  }
+
+  const message = String(error.message || error || '').toLowerCase()
+  return error.name === 'AbortError' || message.includes('abort') || message.includes('aborted')
+}
+
+const clearExecutionRequestController = () => {
+  executionRequestController.value = null
+}
+
+const abortExecutionRequest = () => {
+  const controller = executionRequestController.value
+  if (controller && !controller.signal.aborted) {
+    controller.abort()
+  }
+  clearExecutionRequestController()
+}
+
+const stopCommandExecution = async () => {
+  if (!executing.value) {
+    return true
+  }
+
+  try {
+    const response = await fetch('/api/devices/commands/stop', {
+      method: 'POST'
+    })
+
+    if (!response.ok) {
+      let errorMessage = t('commandExecution.alerts.stopFailed')
+      try {
+        const errorData = await response.json()
+        errorMessage = errorData.detail || errorMessage
+      } catch {
+        // ignore json parse failure and keep fallback message
+      }
+
+      throw new Error(errorMessage)
+    }
+
+    abortExecutionRequest()
+    return true
+  } catch (error) {
+    console.error('停止命令执行失败:', error)
+    alert(t('commandExecution.alerts.stopFailedWithDetail', {
+      detail: error.message || t('commandExecution.alerts.stopFailed')
+    }))
+    return false
+  }
+}
+
+onBeforeRouteLeave(async (to, from, next) => {
+  if (!executing.value) {
+    next()
+    return
+  }
+
+  const confirmed = confirm(t('commandExecution.alerts.leaveConfirm'))
+  if (!confirmed) {
+    next(false)
+    return
+  }
+
+  const stopped = await stopCommandExecution()
+  next(stopped)
+})
+
+onBeforeUnmount(() => {
+  abortExecutionRequest()
+})
+
  
 
 // 执行命令
 const executeCommands = async () => {
   if (!commandInput.value.trim()) {
-    alert('请输入命令序列')
+    alert(t('commandExecution.alerts.empty'))
     return
   }
   
+  const abortController = new AbortController()
+  executionRequestController.value = abortController
   executing.value = true
   executionResults.value = []
   
@@ -142,11 +222,12 @@ const executeCommands = async () => {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ commands: commandInput.value })
+      body: JSON.stringify({ commands: commandInput.value }),
+      signal: abortController.signal
     })
     
     if (!response.ok) {
-      let errorMessage = '执行命令失败'
+      let errorMessage = t('commandExecution.alerts.failed')
       try {
         const errorData = await response.json()
         errorMessage = errorData.detail || errorMessage
@@ -159,11 +240,19 @@ const executeCommands = async () => {
     const data = await response.json()
     executionResults.value = data.results
   } catch (error) {
+    if (isAbortError(error)) {
+      executionResults.value = [
+        { status: 'info', message: t('commandExecution.alerts.executionStopped') }
+      ]
+      return
+    }
+
     console.error('执行命令失败:', error)
     executionResults.value = [
-      { status: 'error', message: '执行命令失败：' + error.message }
+      { status: 'error', message: t('commandExecution.alerts.failedWithDetail', { detail: error.message }) }
     ]
   } finally {
+    clearExecutionRequestController()
     executing.value = false
   }
 }

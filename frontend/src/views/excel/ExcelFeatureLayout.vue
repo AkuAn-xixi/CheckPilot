@@ -2,19 +2,20 @@
   <div class="excel-workspace">
     <section v-if="isDirectory" class="card excel-directory overflow-hidden">
       <div class="excel-directory-copy">
-        <p class="eyebrow">Excel Workspace</p>
-        <h2 class="excel-directory-title">选择 Excel 执行模块</h2>
+        <p class="eyebrow">{{ $t('excelDirectory.eyebrow') }}</p>
+        <h2 class="excel-directory-title">{{ $t('excelDirectory.title') }}</h2>
         <p class="excel-directory-subtitle">
-          先选择功能，再进入对应工作区。目录页本身不直接展开具体内容，避免初始进入时出现整页下拉条。
+          {{ $t('excelDirectory.subtitle') }}
         </p>
       </div>
 
       <div class="excel-directory-grid">
-        <router-link
+        <button
           v-for="feature in features"
           :key="feature.to"
-          :to="feature.to"
+          type="button"
           class="feature-card directory-card"
+          @click="openFeature(feature.to)"
         >
           <div class="flex items-start justify-between gap-4">
             <div>
@@ -26,9 +27,9 @@
           </div>
           <div class="mt-5 flex items-center justify-between text-sm">
             <span class="text-slate-500">{{ feature.status }}</span>
-            <span class="font-medium text-sky-700">进入功能</span>
+            <span class="font-medium text-sky-700">{{ $t('excelDirectory.enterFeature') }}</span>
           </div>
-        </router-link>
+        </button>
       </div>
     </section>
 
@@ -40,30 +41,58 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
+const { t } = useI18n({ useScope: 'global' })
 
-const features = [
+const features = computed(() => [
   {
     index: '01',
     tag: 'Visual Check',
-    label: '图片校验执行',
-    description: '沿用现有 Excel 驱动执行、截图和校验图比对流程。',
-    status: '已接入当前执行链',
+    label: t('excelDirectory.visualCheck.label'),
+    description: t('excelDirectory.visualCheck.description'),
+    status: t('excelDirectory.visualCheck.status'),
     to: '/excel/cases'
   },
   {
     index: '02',
     tag: 'Speech Validation',
-    label: 'ASR 自动化',
-    description: '承载录音、语音识别和参考文本比对能力，复用当前设备与 Excel 入口。',
-    status: '已建立架构入口',
+    label: t('excelDirectory.speechValidation.label'),
+    description: t('excelDirectory.speechValidation.description'),
+    status: t('excelDirectory.speechValidation.status'),
     to: '/excel/asr'
   }
-]
+])
 
 const isDirectory = computed(() => route.path === '/excel')
+
+const loadCurrentDevice = async () => {
+  try {
+    const response = await fetch('/api/devices/current')
+    if (!response.ok) {
+      return ''
+    }
+
+    const data = await response.json().catch(() => ({}))
+    return typeof data.device === 'string' ? data.device : ''
+  } catch (error) {
+    console.error('获取当前设备失败:', error)
+    return ''
+  }
+}
+
+const openFeature = async (to) => {
+  const currentDevice = await loadCurrentDevice()
+  if (!currentDevice) {
+    alert(t('excelDirectory.alerts.selectDeviceFirst'))
+    return
+  }
+
+  await router.push(to)
+}
 </script>
 
 <style scoped>
@@ -106,12 +135,18 @@ const isDirectory = computed(() => route.path === '/excel')
 
 .feature-card {
   display: block;
+  width: 100%;
   padding: 24px;
   border-radius: 28px;
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(255, 255, 255, 0.82);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 18px 38px rgba(15, 23, 42, 0.08);
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  appearance: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .directory-card {
@@ -127,6 +162,11 @@ const isDirectory = computed(() => route.path === '/excel')
 .feature-card.active {
   border-color: rgba(14, 165, 233, 0.5);
   background: linear-gradient(180deg, rgba(240, 249, 255, 0.96), rgba(255, 255, 255, 0.9));
+}
+
+.feature-card:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.35);
+  outline-offset: 3px;
 }
 
 .feature-index {

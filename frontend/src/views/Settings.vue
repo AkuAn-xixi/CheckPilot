@@ -1,14 +1,13 @@
 <template>
   <div class="card">
-    <h2 class="mb-4">设置</h2>
+    <h2 class="mb-4">{{ $t('settings.title') }}</h2>
     
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <!-- 执行设置 -->
       <div class="border rounded-lg p-4">
-        <h3 class="font-medium mb-4">执行设置</h3>
+        <h3 class="font-medium mb-4">{{ $t('settings.execution') }}</h3>
         
         <div class="form-group">
-          <label class="form-label">执行模式</label>
+          <label class="form-label">{{ $t('settings.executionMode') }}</label>
           <div class="space-y-2">
             <div class="flex items-center">
               <input 
@@ -18,7 +17,7 @@
                 value="direct"
                 class="mr-2"
               >
-              <label for="executionModeDirect">直接执行</label>
+              <label for="executionModeDirect">{{ $t('settings.direct') }}</label>
             </div>
             <div class="flex items-center">
               <input 
@@ -28,13 +27,13 @@
                 value="step"
                 class="mr-2"
               >
-              <label for="executionModeStep">步进执行</label>
+              <label for="executionModeStep">{{ $t('settings.step') }}</label>
             </div>
           </div>
         </div>
         
         <div class="form-group mt-4">
-          <label class="form-label">时间控制模式</label>
+          <label class="form-label">{{ $t('settings.timeControlMode') }}</label>
           <div class="space-y-2">
             <div class="flex items-center">
               <input 
@@ -44,7 +43,7 @@
                 value="script"
                 class="mr-2"
               >
-              <label for="timeModeScript">脚本时间</label>
+              <label for="timeModeScript">{{ $t('settings.scriptTime') }}</label>
             </div>
             <div class="flex items-center">
               <input 
@@ -54,13 +53,13 @@
                 value="global"
                 class="mr-2"
               >
-              <label for="timeModeGlobal">全局时间</label>
+              <label for="timeModeGlobal">{{ $t('settings.globalTime') }}</label>
             </div>
           </div>
         </div>
         
         <div class="form-group mt-4" v-if="settings.timeControlMode === 'global'">
-          <label class="form-label" for="globalDelay">全局延迟时间 (秒)</label>
+          <label class="form-label" for="globalDelay">{{ $t('settings.globalDelay') }}</label>
           <input 
             type="number" 
             id="globalDelay" 
@@ -68,35 +67,34 @@
             class="form-input"
             min="0"
             step="0.1"
-            placeholder="输入全局延迟时间"
+            :placeholder="$t('settings.globalDelayPlaceholder')"
           >
         </div>
       </div>
       
-      <!-- 关于 -->
       <div class="border rounded-lg p-4">
-        <h3 class="font-medium mb-4">关于</h3>
+        <h3 class="font-medium mb-4">{{ $t('settings.about') }}</h3>
         
         <div class="space-y-3">
           <div>
-            <p class="font-medium">应用名称</p>
-            <p class="text-gray-600">ADB 控制工具</p>
+            <p class="font-medium">{{ $t('settings.appName') }}</p>
+            <p class="text-gray-600">{{ $t('settings.appNameValue') }}</p>
           </div>
           <div>
-            <p class="font-medium">版本</p>
+            <p class="font-medium">{{ $t('settings.version') }}</p>
             <p class="text-gray-600">1.0.0</p>
           </div>
           <div>
-            <p class="font-medium">描述</p>
-            <p class="text-gray-600">基于Web的ADB设备控制和命令执行工具</p>
+            <p class="font-medium">{{ $t('settings.description') }}</p>
+            <p class="text-gray-600">{{ $t('settings.descriptionValue') }}</p>
           </div>
           <div>
-            <p class="font-medium">功能</p>
+            <p class="font-medium">{{ $t('settings.features') }}</p>
             <ul class="list-disc pl-5 space-y-1 text-gray-600">
-              <li>设备管理和选择</li>
-              <li>命令序列执行</li>
-              <li>Excel文件命令执行</li>
-              <li>执行模式配置</li>
+              <li>{{ $t('settings.featureList.devices') }}</li>
+              <li>{{ $t('settings.featureList.commands') }}</li>
+              <li>{{ $t('settings.featureList.excel') }}</li>
+              <li>{{ $t('settings.featureList.executionMode') }}</li>
             </ul>
           </div>
         </div>
@@ -105,7 +103,7 @@
     
     <div class="mt-6 flex justify-end">
       <button @click="saveSettings" class="btn btn-primary">
-        保存设置
+        {{ $t('settings.saveSettings') }}
       </button>
     </div>
   </div>
@@ -113,36 +111,33 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 
-// 状态管理
+const { t } = useI18n({ useScope: 'global' })
+
 const settings = ref({
   executionMode: 'direct',
   timeControlMode: 'script',
   globalDelay: 1.0
 })
 
-// 加载设置
 onMounted(() => {
   loadSettings()
 })
 
-// 加载设置
 const loadSettings = () => {
-  // 从localStorage加载设置
   const savedSettings = localStorage.getItem('adbControlSettings')
   if (savedSettings) {
     try {
       settings.value = JSON.parse(savedSettings)
     } catch (error) {
-      console.error('加载设置失败:', error)
+      console.error(t('settings.alerts.loadFailed'), error)
     }
   }
 }
 
-// 保存设置
 const saveSettings = () => {
-  // 保存到localStorage
   localStorage.setItem('adbControlSettings', JSON.stringify(settings.value))
-  alert('设置已保存')
+  alert(t('settings.alerts.saveSuccess'))
 }
 </script>

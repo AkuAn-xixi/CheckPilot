@@ -10,14 +10,24 @@ _DEFAULT_VALID_KEYS = {
     'SOURCE', 'MENU', 'CHUP', 'CHDOWN', 'DIGITAL', 'EXITMENU', 'DIGITAL1',
     'DIGITAL2', 'DIGITAL3', 'DIGITAL4', 'DIGITAL5', 'DIGITAL6', 'DIGITAL7',
     'DIGITAL8', 'DIGITAL9', 'DIGITAL0', 'LIBRARY', 'TV_AV', 'VOLUMEUP',
-    'VOLUMEDOWN', 'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'ACTION3', 'APPS', 'FILES', 'MUTE'
+    'VOLUMEDOWN', 'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'ACTION3', 'APPS',
+    'FILES', 'MUTE', 'DISCOVERY', 'ASSERT',
 }
+
+# 系统级占位按键：无论用户的 customization 方案怎么配置，这些都视作"始终合法"。
+# 这类按键不发实际 keyevent（如 ASSERT 是步骤分隔/断言占位符），由执行层识别后跳过。
+_SYSTEM_VALID_KEYS = {'ASSERT'}
 
 _CUSTOMIZATION_FILE = Path(__file__).resolve().parents[1] / "customization.json"
 
 
 def get_valid_keys() -> set:
-    """从配置文件加载合法按键集合，读取当前激活方案，不存在时返回默认值。"""
+    """从配置文件加载合法按键集合，读取当前激活方案，不存在时返回默认值。
+
+    无论用户方案里有没有，``_SYSTEM_VALID_KEYS`` 总会被合并进去，避免 ASSERT 这类
+    占位按键被旧方案误判为无效。
+    """
+    keys: set = set()
     if _CUSTOMIZATION_FILE.exists():
         try:
             with open(_CUSTOMIZATION_FILE, "r", encoding="utf-8") as f:
@@ -26,14 +36,17 @@ def get_valid_keys() -> set:
             if "schemes" in data:
                 active = data.get("active_scheme", "默认")
                 scheme = data.get("schemes", {}).get(active, {})
-                keys = scheme.get("valid_keys")
+                scheme_keys = scheme.get("valid_keys")
             else:
-                keys = data.get("valid_keys")
-            if isinstance(keys, list) and keys:
-                return set(keys)
+                scheme_keys = data.get("valid_keys")
+            if isinstance(scheme_keys, list) and scheme_keys:
+                keys = set(scheme_keys)
         except Exception:
-            pass
-    return set(_DEFAULT_VALID_KEYS)
+            keys = set()
+    if not keys:
+        keys = set(_DEFAULT_VALID_KEYS)
+    keys.update(_SYSTEM_VALID_KEYS)
+    return keys
 
 
 # 定义所有合法的按键名称

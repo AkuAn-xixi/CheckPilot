@@ -11,6 +11,17 @@ class CommandExecuteRequest(BaseModel):
 class SingleCommandExecuteRequest(BaseModel):
     command: str
 
+class DevicePreviewSaveRequest(BaseModel):
+    image_base64: str
+    file_name: Optional[str] = None
+    save_dir: Optional[str] = None
+    overwrite: Optional[bool] = False
+
+
+class CaptureCardDeviceSelectRequest(BaseModel):
+    device_id: int
+    label: Optional[str] = None
+
 class ExcelExecuteRequest(BaseModel):
     file_name: str
     row_index: int
@@ -18,6 +29,15 @@ class ExcelExecuteRequest(BaseModel):
 class AppendSequenceRequest(BaseModel):
     file_name: str
     sequence: str
+    case_number: Optional[str] = None
+    assert_format: Optional[str] = None
+    check_pic: Optional[str] = None
+    check_point: Optional[str] = None
+
+class AppendAssertRequest(BaseModel):
+    file_name: str
+    case_number: str
+    assert_format: Optional[str] = None
 
 class WriteCellRequest(BaseModel):
     file_name: str
@@ -33,6 +53,7 @@ class ExcelCaseFieldsUpdateRequest(BaseModel):
     pre_script: str = ''
     step: Optional[str] = None
     verify_image: str
+    test_result: str = ''
 
 class DeviceInfo(BaseModel):
     serial: str

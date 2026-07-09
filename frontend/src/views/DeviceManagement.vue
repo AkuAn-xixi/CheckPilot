@@ -1,24 +1,24 @@
 <template>
   <div class="card">
-    <h2 class="mb-4">设备管理</h2>
+    <h2 class="mb-4">{{ $t('deviceManagement.title') }}</h2>
     
     <div class="mb-6">
       <button @click="loadDevices" class="btn btn-secondary mb-4">
-        刷新设备列表
+        {{ $t('deviceManagement.refresh') }}
       </button>
       
       <div v-if="loading">
-        <p>加载中...</p>
+        <p>{{ $t('common.loading') }}</p>
       </div>
       
       <div v-else-if="devices.length > 0">
-        <p class="mb-4">已检测到 {{ devices.length }} 个ADB设备：</p>
+        <p class="mb-4">{{ $t('deviceManagement.detected', { count: devices.length }) }}</p>
         
         <div class="space-y-4">
           <div v-for="(device, index) in devices" :key="device" class="border rounded-lg p-4">
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium">设备 {{ index + 1 }}</p>
+                <p class="font-medium">{{ $t('deviceManagement.deviceLabel', { index: index + 1 }) }}</p>
                 <p class="text-gray-600">{{ device }}</p>
               </div>
                 <button 
@@ -26,7 +26,7 @@
                   class="btn btn-primary"
                   :disabled="selectedDevice === device"
                 >
-                  {{ selectedDevice === device ? '已选择' : '选择' }}
+                  {{ selectedDevice === device ? $t('excelAsr.selectedModel') : $t('common.execute') }}
                 </button>
             </div>
           </div>
@@ -34,25 +34,25 @@
       </div>
       
       <div v-else>
-        <p class="text-danger mb-4">未检测到ADB设备，请确保设备已连接并开启USB调试模式。</p>
+        <p class="text-danger mb-4">{{ $t('deviceManagement.noDevices') }}</p>
         <div class="bg-yellow-50 p-4 rounded-lg">
-          <h4 class="font-medium mb-2">排查步骤：</h4>
+          <h4 class="font-medium mb-2">{{ $t('deviceManagement.troubleshooting') }}</h4>
           <ul class="list-disc pl-5 space-y-1">
-            <li>确保设备已通过USB连接到电脑</li>
-            <li>在设备上开启USB调试模式</li>
-            <li>安装设备驱动程序（如果需要）</li>
-            <li>尝试重新连接USB线缆</li>
-            <li>重启ADB服务：adb kill-server && adb start-server</li>
+            <li>{{ $t('deviceManagement.steps.connect') }}</li>
+            <li>{{ $t('deviceManagement.steps.debug') }}</li>
+            <li>{{ $t('deviceManagement.steps.driver') }}</li>
+            <li>{{ $t('deviceManagement.steps.reconnect') }}</li>
+            <li>{{ $t('deviceManagement.steps.restartAdb') }}</li>
           </ul>
         </div>
       </div>
     </div>
     
     <div v-if="selectedDevice" class="bg-green-50 p-4 rounded-lg">
-      <h3 class="text-success mb-2">当前选中设备</h3>
+      <h3 class="text-success mb-2">{{ $t('deviceManagement.currentDevice') }}</h3>
       <p>{{ selectedDevice }}</p>
       <p class="text-sm text-gray-600 mt-2">
-        设备已成功选择，可以在命令执行或Excel执行页面执行命令。
+        {{ $t('deviceManagement.currentDeviceDescription') }}
       </p>
     </div>
   </div>
@@ -60,11 +60,20 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 
+const DEVICE_STATUS_EVENT = 'checkpilot:device-updated'
 // 状态管理
 const devices = ref([])
 const selectedDevice = ref('')
 const loading = ref(false)
+const { t } = useI18n({ useScope: 'global' })
+
+const notifyCurrentDeviceChange = (device = selectedDevice.value || '') => {
+  window.dispatchEvent(new CustomEvent(DEVICE_STATUS_EVENT, {
+    detail: { device }
+  }))
+}
 
 // 加载设备列表和当前设备
 onMounted(async () => {
@@ -110,14 +119,15 @@ const selectDevice = async (index) => {
     })
     const data = await response.json()
       if (data.status === 'success') {
-        selectedDevice.value = data.device
-        alert('设备选择成功')
+        selectedDevice.value = data.device || ''
+        notifyCurrentDeviceChange()
+        alert(t('deviceManagement.alerts.selected'))
       } else {
-        alert('选择设备失败：' + (data.detail || '未知错误'))
+        alert(t('deviceManagement.alerts.failed', { detail: data.detail || t('deviceManagement.alerts.unknown') }))
       }
   } catch (error) {
     console.error('选择设备失败:', error)
-    alert('选择设备失败，请重试')
+    alert(t('deviceManagement.alerts.retry'))
   }
 }
 </script>

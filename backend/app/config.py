@@ -28,8 +28,30 @@ class Settings:
     SCREENSHOT_DIR: Path = WORKING_DIR / "screenshots"
     TEST_CASES_DIR: Path = WORKING_DIR / "test_cases"
     ASR_MODELS_DIR: Path = WORKING_DIR / "asr_models"
+    IMAGE_MODELS_DIR: Path = WORKING_DIR / "image_models"
+    REPORTS_DIR: Path = WORKING_DIR / "reports"
+    RECORDING_DIR: Path = WORKING_DIR / "recordings"
+    LOG_DIR: Path = WORKING_DIR / "log"
+    CAPTURE_CARD_DEVICE_ID: int = 1
+    CAPTURE_CARD_WIDTH: int = 1920
+    CAPTURE_CARD_HEIGHT: int = 1080
+    CAPTURE_CARD_FPS_TARGET: int = 60
+    # MJPEG 通常能让 USB 采集卡稳定跑 1080p60；YUY2 在 USB2 带宽下大多被限到 30fps。
+    # 设为 "" 表示沿用驱动默认。常见可选: "MJPG" / "YUY2" / "NV12"
+    CAPTURE_CARD_FOURCC: str = "MJPG"
+    # 后端推流目标帧率：0 表示不主动节流，由采集 + 编码自然吃满
+    CAPTURE_CARD_STREAM_FPS: int = 60
+    # MJPEG 编码质量 0-100；75 在视觉上和 90+ 几乎不可分辨，但帧时间能少一半
+    CAPTURE_CARD_JPEG_QUALITY: int = 75
+    CAPTURE_CARD_RECORDING_FPS: int = 30
+    RECORDING_MAX_DURATION: int = 180
     ADB_TIMEOUT: int = 30
     CUSTOMIZATION_FILE: Path = WORKING_DIR / "customization.json"
+
+    # 命令执行的硬最小延迟（秒）。0 表示不强制最低值。早期版本默认 1 秒避免
+     # 连按过快，现在改为由用户在客制化页配置 ``extra_command_delay`` 来叠加额外
+    # 等待时间，更直观；保留这个 settings 项以备需要时启用。
+    COMMAND_MIN_DELAY_SECONDS: float = 0.0
 
     @property
     def FRONTEND_DIST_DIR(self) -> Path:
@@ -47,6 +69,10 @@ class Settings:
         self.WORKING_DIR.mkdir(parents=True, exist_ok=True)
         self.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         self.ASR_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        self.IMAGE_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        self.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        self.RECORDING_DIR.mkdir(parents=True, exist_ok=True)
+        self.LOG_DIR.mkdir(parents=True, exist_ok=True)
         (self.TEST_CASES_DIR / "excel").mkdir(parents=True, exist_ok=True)
         (self.TEST_CASES_DIR / "images").mkdir(parents=True, exist_ok=True)
 

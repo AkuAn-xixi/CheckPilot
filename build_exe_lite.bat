@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title ADBControl Build
+title ADBControl Lite Build
 
 
 cd /d "%~dp0"
@@ -27,6 +27,26 @@ set "PYTHON_CMD=python"
 if exist "%~dp0.venv\Scripts\python.exe" (
   set "PYTHON_CMD=%~dp0.venv\Scripts\python.exe"
 )
+
+echo ============================================================
+echo           ADBControl Lite Build (精简版)
+echo ============================================================
+echo.
+echo [INFO] 此版本不包含以下大型依赖：
+echo   - PyTorch (~500 MB)
+echo   - Transformers (~100 MB)
+echo   - SciPy (~110 MB)
+echo   - LLVM/numba (~130 MB)
+echo   - nagisa/gradio (~85 MB)
+echo.
+echo [INFO] 预估打包大小：~150 MB (原版 ~405 MB)
+echo.
+echo [WARNING] 精简版不支持以下功能：
+echo   - DINOv2 图像比对（仅支持 OpenCV）
+echo   - ASR 语音识别
+echo.
+echo ============================================================
+echo.
 
 echo [1/4] Checking environment: Node.js / Python / pip
 where node >nul 2>nul
@@ -69,7 +89,7 @@ if exist "frontend\package.json" (
   if errorlevel 1 goto :npm_fail
   if not exist "node_modules\.bin\vite.cmd" (
     echo Frontend dependencies are incomplete.
-    echo If esbuild.exe is in use, close the frontend dev server or the esbuild terminal and run build_exe.bat again.
+    echo If esbuild.exe is in use, close the frontend dev server or the esbuild terminal and run build_exe_lite.bat again.
     goto :npm_fail
   )
   echo - Building production bundle...
@@ -105,10 +125,10 @@ if exist "backend\requirements.txt" (
   )
 )
 
-echo [4/4] Building EXE
-if exist "dist\ADBControl.exe" (
-  echo - Stopping running ADBControl.exe processes that would lock dist\ADBControl.exe
-  taskkill /f /im ADBControl.exe >nul 2>nul
+echo [4/4] Building EXE (Lite)
+if exist "dist\ADBControl_lite.exe" (
+  echo - Stopping running ADBControl_lite.exe processes that would lock dist\ADBControl_lite.exe
+  taskkill /f /im ADBControl_lite.exe >nul 2>nul
 )
 if exist "dist" (
   echo - Cleaning old dist directory
@@ -133,13 +153,13 @@ if not exist "frontend\dist\index.html" (
   exit /b 1
 )
 
-if not exist "ADBControl.spec" (
-  echo ADBControl.spec not found
+if not exist "ADBControl_lite.spec" (
+  echo ADBControl_lite.spec not found
   pause
   exit /b 1
 )
 
-"%PYTHON_CMD%" -m PyInstaller --clean --noconfirm ADBControl.spec
+"%PYTHON_CMD%" -m PyInstaller --clean --noconfirm ADBControl_lite.spec
 if errorlevel 1 (
   echo Build failed
   pause
@@ -147,9 +167,23 @@ if errorlevel 1 (
 )
 
 echo.
-echo Build completed:
-echo - Executable: "%~dp0dist\ADBControl.exe"
+echo ============================================================
+echo           Build completed (精简版)
+echo ============================================================
+echo - Executable: "%~dp0dist\ADBControl_lite.exe"
 echo - Visit after start: http://localhost:8000/
+echo.
+echo [INFO] 精简版功能：
+echo   ✓ 采集卡录屏
+echo   ✓ OpenCV 图像比对
+echo   ✓ Excel 执行
+echo   ✓ ADB 控制
+echo   ✓ 报告生成
+echo.
+echo [INFO] 不支持的功能：
+echo   ✗ DINOv2 图像比对
+echo   ✗ ASR 语音识别
+echo ============================================================
 echo.
 pause
 exit /b 0
@@ -173,6 +207,6 @@ for /l %%I in (1,1,5) do (
 )
 echo Failed to clean "%TARGET_DIR%". Files in this directory are still in use.
 if /i "%TARGET_DIR%"=="dist" (
-  echo Please close any running ADBControl.exe window and try again.
+  echo Please close any running ADBControl_lite.exe window and try again.
 )
 exit /b 1

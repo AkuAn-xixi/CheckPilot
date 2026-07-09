@@ -5,22 +5,48 @@ datas = [
     ('frontend\\dist', 'frontend\\dist'),
     ('backend\\test_cases', 'backend\\test_cases'),
 ]
+
 binaries = []
 hiddenimports = ['anyio', 'uvicorn', 'fastapi', 'starlette', 'pydantic', 'pandas', 'numpy', 'openpyxl', 'cv2', 'multipart']
-tmp_ret = collect_all('pydantic')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('starlette')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('pandas')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('numpy')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('openpyxl')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('cv2')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('multipart')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
+
+def collect_package(package_name, required=True):
+    global datas, binaries, hiddenimports
+    try:
+        tmp_ret = collect_all(package_name)
+    except Exception as exc:
+        if required:
+            raise RuntimeError(f"[ADBControl.spec] required package is missing from the build environment: {package_name}") from exc
+        print(f"[ADBControl.spec] optional package not collected: {package_name}")
+        return
+
+    datas += tmp_ret[0]
+    binaries += tmp_ret[1]
+    hiddenimports += tmp_ret[2]
+
+
+for package_name in (
+    'pydantic',
+    'starlette',
+    'pandas',
+    'numpy',
+    'openpyxl',
+    'cv2',
+    'multipart',
+):
+    collect_package(package_name)
+
+# imageio + ffmpeg：采集卡录屏转换为浏览器兼容格式（H.264/VP8）
+collect_package('imageio', required=True)
+collect_package('imageio_ffmpeg', required=True)
+
+# 可选：Windows 上用 pygrabber 列出 DirectShow 真实设备名
+collect_package('pygrabber', required=False)
+collect_package('comtypes', required=False)
+
+datas = list(dict.fromkeys(datas))
+binaries = list(dict.fromkeys(binaries))
+hiddenimports = list(dict.fromkeys(hiddenimports))
 
 
 a = Analysis(

@@ -5,6 +5,7 @@ from typing import Optional
 from ..models.schemas import (
     ExcelExecuteRequest,
     AppendSequenceRequest,
+    AppendAssertRequest,
     WriteCellRequest,
     ExcelCaseFieldsUpdateRequest,
     ExcelValidationResult,
@@ -89,6 +90,7 @@ async def delete_excel_file(file_name: str = Query(..., description="Excel文件
 async def write_cell(req: WriteCellRequest):
     """写入Excel单元格"""
     try:
+        print(f"[write_cell] file={req.file_name} col={req.column_name} row={req.row_index} value={repr(req.value)}")
         result = excel_service.write_cell(
             req.file_name,
             req.column_name,
@@ -99,6 +101,8 @@ async def write_cell(req: WriteCellRequest):
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
 
 @router.post("/update_case_fields")
@@ -113,6 +117,7 @@ async def update_case_fields(req: ExcelCaseFieldsUpdateRequest):
             req.pre_script,
             req.verify_image,
             req.step,
+            req.test_result,
         )
         return result
     except FileNotFoundError as e:
@@ -126,10 +131,17 @@ async def update_case_fields(req: ExcelCaseFieldsUpdateRequest):
 async def append_sequence(req: AppendSequenceRequest):
     """将序列写入 preScript 列中最后一个仍为空的有效数据行。"""
     try:
-        result = excel_service.append_sequence_to_latest_prescript(req.file_name, req.sequence)
+        result = excel_service.append_sequence_to_latest_prescript(
+            req.file_name, req.sequence, req.case_number, req.assert_format,
+            req.check_pic, req.check_point
+        )
+        message = f"序列已写入第 {result['excel_row']} 行的 preScript"
+        written_columns = result.get('written_columns') or []
+        if written_columns:
+            message += f"，并已同步写入 {'/'.join(written_columns)}"
         return {
             **result,
-            "message": f"序列已写入第 {result['excel_row']} 行的 preScript",
+            "message": message,
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -137,6 +149,30 @@ async def append_sequence(req: AppendSequenceRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"写入 preScript 失败: {str(e)}")
+
+@router.get("/case_state")
+async def get_case_state(file_name: str = Query(...), case_number: str = Query(...)):
+    """查询指定 case 在 Excel 中的当前状态（是否存在、assert 次数、checkPic 数量等）。"""
+    try:
+        return excel_service.get_case_state(file_name, case_number)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询 case 状态失败: {str(e)}")
+
+@router.post("/append_assert")
+async def append_assert(req: AppendAssertRequest):
+    """直接将 Assert 指令写入指定 case 的 preScript 末尾（已有则覆盖）。"""
+    try:
+        result = excel_service.append_assert_to_case(req.file_name, req.case_number, req.assert_format)
+        action = "覆盖" if result.get("replaced") else "追加"
+        return {**result, "message": f"Assert 已{action}写入第 {result['excel_row']} 行"}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入 Assert 失败: {str(e)}")
 
 @router.get("/verify_image")
 async def verify_image(file_name: str = Query(...), image_name: str = Query(...)):

@@ -1,10 +1,27 @@
 {
-  "00FC": "SOURCE",
-  "0325": "DISCOVERY",
-  "0326": "FILES",
-  "0327": "APPS",
-  "033C": "WHALETV",
-  "KPSLASH": "YOUTUBE",
-  "LIBRARY": "DISCOVERY",
-  "RIGHTCTRL": "NETFLIX"
+  "active_scheme": "公版",
+  "schemes": {
+    "Hikken": {
+      "HOMEPAGE": "HOME"
+    },
+    "公版": {
+      "00C7": "AUDIO",
+      "HOMEPAGE": "HOME",
+      "SCAN_C0086": "FILES",
+      "SCAN_C00F6": "SETTING",
+      "SELECT": "OK"
+    },
+    "默认": {
+      "00FC": "SOURCE",
+      "0325": "DISCOVERY",
+      "0326": "FILES",
+      "0327": "APPS",
+      "033C": "WHALETV",
+      "DVD": "DOWN",
+      "KPSLASH": "YOUTUBE",
+      "LIBRARY": "DISCOVERY",
+      "MACRO": "DISNEY",
+      "RIGHTCTRL": "NETFLIX"
+    }
+  }
 }

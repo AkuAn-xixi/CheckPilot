@@ -4,6 +4,20 @@
     <div class="app-orb app-orb-right"></div>
     <div class="app-grid"></div>
 
+    <div v-if="showLocaleSwitcher" class="locale-switcher" role="group" :aria-label="$t('app.language')">
+      <button
+        v-for="option in localeOptions"
+        :key="option.value"
+        type="button"
+        class="locale-button"
+        :class="{ active: locale === option.value }"
+        @click="changeLocale(option.value)"
+      >
+        <span>{{ option.short }}</span>
+        <small>{{ option.label }}</small>
+      </button>
+    </div>
+
     <section v-if="isExcelFeatureFullscreen" class="app-fullscreen-content">
       <router-view />
     </section>
@@ -18,21 +32,32 @@
               <span></span>
             </div>
             <div>
-              <p class="eyebrow">Precision Automation Workspace</p>
-              <h1 class="brand-title">ADB 控制中心</h1>
+              <p class="eyebrow">{{ $t('app.brandEyebrow') }}</p>
+              <h1 class="brand-title">{{ $t('app.brandTitle') }}</h1>
             </div>
           </div>
 
           <div class="topbar-summary">
             <div class="topbar-pill">
-              <span class="pill-label">当前模块</span>
+              <span class="pill-label">{{ $t('app.currentSection') }}</span>
               <strong>{{ currentSection.label }}</strong>
               <span class="pill-value">{{ currentSection.description }}</span>
             </div>
             <div class="topbar-pill" :class="{ idle: !currentDevice }">
-              <span class="pill-label">设备连接</span>
-              <strong>{{ currentDevice ? '已连接' : '等待选择' }}</strong>
-              <span class="pill-value">{{ currentDevice || '未选择设备' }}</span>
+              <span class="pill-label">{{ $t('app.deviceConnection') }}</span>
+              <strong>{{ currentDevice ? $t('app.connected') : $t('app.waitingSelection') }}</strong>
+              <span class="pill-value">{{ currentDevice || $t('app.noDeviceSelected') }}</span>
+            </div>
+            <div class="topbar-pill" :class="{ idle: !platformAuthAuthenticated }">
+              <span class="pill-label">{{ $t('app.platformAuth') }}</span>
+              <strong>{{ platformAuthAuthenticated ? $t('app.platformLoggedIn') : $t('app.platformLoggedOut') }}</strong>
+              <span class="pill-value">
+                {{
+                  platformAuthAuthenticated
+                    ? $t('app.platformLoggedInAs', { username: platformAuthUsername })
+                    : $t('app.platformLoginPending')
+                }}
+              </span>
             </div>
           </div>
         </div>
@@ -42,8 +67,8 @@
         <aside class="app-sidebar">
           <section class="card sidebar-panel">
             <div class="sidebar-header">
-              <p class="eyebrow">Navigation</p>
-              <h2 class="sidebar-title">工作台</h2>
+              <p class="eyebrow">{{ $t('app.navEyebrow') }}</p>
+              <h2 class="sidebar-title">{{ $t('app.navTitle') }}</h2>
             </div>
             <nav class="nav-stack">
               <router-link
@@ -69,55 +94,132 @@
       </main>
 
       <footer class="app-footer">
-        <span>ADB Control Tool v1.1.0</span>
-        <span>{{ currentDevice ? `当前设备：${currentDevice}` : statusMessage }}</span>
+        <span>ADB Control Tool v1.1.1</span>
+        <span>{{ currentDevice ? t('app.currentDevice', { device: currentDevice }) : statusMessage }}</span>
       </footer>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import { setLocale } from './i18n'
 
+const DEVICE_STATUS_EVENT = 'checkpilot:device-updated'
+const PLATFORM_AUTH_EVENT = 'checkpilot:platform-auth-updated'
 const currentDevice = ref('')
-const statusMessage = ref('系统就绪')
+const platformAuthAuthenticated = ref(false)
+const platformAuthUsername = ref('')
 const route = useRoute()
+const { t, locale } = useI18n({ useScope: 'global' })
 
-const navItems = [
-  { to: '/', label: '首页', description: '查看设备总览与常用入口' },
-  { to: '/devices', label: '设备管理', description: '连接、刷新并锁定目标设备' },
-  { to: '/commands', label: '命令执行', description: '直接发送 ADB 指令与序列' },
-  { to: '/excel', label: 'Excel 执行', description: '从用例表驱动步骤与截图校验' },
-  { to: '/keymonitor', label: '按键监听', description: '采集遥控器事件并清洗映射' },
-  { to: '/customization', label: '客制化', description: '自定义按键列表等全局配置' }
+const localeOptions = [
+  { value: 'zh-CN', short: '中', label: '中文' },
+  { value: 'en-US', short: 'EN', label: 'English' }
 ]
+
+// 语言切换器只在首页显示，避免在功能页（设备/Excel/按键监听等）干扰用户操作
+const showLocaleSwitcher = computed(() => route.path === '/')
+
+const statusMessage = computed(() => t('app.systemReady'))
+
+const sectionItems = computed(() => [
+  { to: '/', label: t('app.nav.home.label'), description: t('app.nav.home.description') },
+  { to: '/devices', label: t('app.nav.devices.label'), description: t('app.nav.devices.description') },
+  { to: '/commands', label: t('app.nav.commands.label'), description: t('app.nav.commands.description') },
+  { to: '/excel', label: t('app.nav.excel.label'), description: t('app.nav.excel.description') },
+  { to: '/keymonitor', label: t('app.nav.keymonitor.label'), description: t('app.nav.keymonitor.description') },
+  { to: '/reports', label: t('app.nav.reports.label'), description: t('app.nav.reports.description') },
+  { to: '/customization', label: t('app.nav.customization.label'), description: t('app.nav.customization.description') }
+])
+
+const navItems = computed(() => sectionItems.value.filter((item) => item.to !== '/devices'))
 
 const currentSection = computed(() => {
   if (route.path === '/') {
-    return navItems[0]
+    return sectionItems.value[0]
   }
 
-  return navItems.find((item) => route.path === item.to || route.path.startsWith(`${item.to}/`)) || navItems[0]
+  return sectionItems.value.find((item) => route.path === item.to || route.path.startsWith(`${item.to}/`)) || sectionItems.value[0]
 })
 
 const isExcelFeatureFullscreen = computed(() => {
-  return route.path.startsWith('/excel/cases') || route.path.startsWith('/excel/asr')
+  return route.path.startsWith('/excel/cases')
+    || route.path.startsWith('/excel/asr')
+    || route.path.startsWith('/keymonitor')
 })
+
+const changeLocale = (value) => {
+  setLocale(value)
+}
 
 const loadCurrentDevice = async () => {
   try {
     const response = await fetch('/api/devices/current')
+    if (!response.ok) {
+      currentDevice.value = ''
+      return
+    }
+
     const data = await response.json()
     currentDevice.value = data.device || ''
   } catch (error) {
+    currentDevice.value = ''
     console.error('获取当前设备失败:', error)
   }
 }
 
+const loadPlatformAuthStatus = async () => {
+  try {
+    const response = await fetch('/api/platform-auth/status')
+    if (!response.ok) {
+      platformAuthAuthenticated.value = false
+      platformAuthUsername.value = ''
+      return
+    }
+
+    const data = await response.json()
+    platformAuthAuthenticated.value = Boolean(data?.authenticated)
+    platformAuthUsername.value = data?.authenticated ? data.username || '' : ''
+  } catch (error) {
+    platformAuthAuthenticated.value = false
+    platformAuthUsername.value = ''
+    console.error('获取平台登录状态失败:', error)
+  }
+}
+
+const handleDeviceStatusChange = (event) => {
+  if (typeof event?.detail?.device === 'string') {
+    currentDevice.value = event.detail.device
+    return
+  }
+
+  void loadCurrentDevice()
+}
+
+const handlePlatformAuthStatusChange = () => {
+  void loadPlatformAuthStatus()
+}
+
 onMounted(async () => {
-  await loadCurrentDevice()
+  window.addEventListener(DEVICE_STATUS_EVENT, handleDeviceStatusChange)
+  window.addEventListener(PLATFORM_AUTH_EVENT, handlePlatformAuthStatusChange)
+  await Promise.all([loadCurrentDevice(), loadPlatformAuthStatus()])
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener(DEVICE_STATUS_EVENT, handleDeviceStatusChange)
+  window.removeEventListener(PLATFORM_AUTH_EVENT, handlePlatformAuthStatusChange)
+})
+
+watch(
+  () => route.fullPath,
+  () => {
+    void Promise.all([loadCurrentDevice(), loadPlatformAuthStatus()])
+  }
+)
 </script>
 
 <style scoped>
@@ -180,6 +282,57 @@ onMounted(async () => {
     linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
   background-size: 56px 56px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 85%);
+}
+
+.locale-switcher {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 5;
+  display: inline-flex;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 16px 44px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(18px);
+}
+
+.locale-button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.locale-button span {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.locale-button small {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.locale-button:hover {
+  transform: translateY(-1px);
+  background: rgba(241, 245, 249, 0.9);
+}
+
+.locale-button.active {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.18), rgba(59, 130, 246, 0.16));
+  color: #0f172a;
 }
 
 .app-topbar,
@@ -246,9 +399,9 @@ onMounted(async () => {
 
 .topbar-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  min-width: min(100%, 500px);
+  min-width: min(100%, 780px);
 }
 
 .topbar-pill {
@@ -276,9 +429,10 @@ onMounted(async () => {
 }
 
 .pill-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: #6b7280;
 }
 
@@ -421,6 +575,13 @@ onMounted(async () => {
 @media (max-width: 820px) {
   .app-shell {
     padding: 16px;
+  }
+
+  .locale-switcher {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    justify-content: center;
   }
 
   .app-topbar-inner,

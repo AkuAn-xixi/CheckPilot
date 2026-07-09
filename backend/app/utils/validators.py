@@ -2,15 +2,11 @@
 import openpyxl
 from collections import Counter
 from typing import Dict, List, Any
+from ...FieldValidation import get_valid_keys as get_runtime_valid_keys
+from .adb_controller import get_keycode_map, NON_EXECUTABLE_KEYS
 from .path_resolver import resolve_image_file
 
-VALID_KEYS = {
-    "OK", "RIGHT", "UP", "LEFT", "DOWN", "SETTING", "HOME", "POWER", "BACK",
-    "SOURCE", "MENU", "CHUP", "CHDOWN", "DIGITAL", "EXITMENU", "DIGITAL1",
-    "DIGITAL2", "DIGITAL3", "DIGITAL4", "DIGITAL5", "DIGITAL6", "DIGITAL7",
-    "DIGITAL8", "DIGITAL9", "DIGITAL0", "LIBRARY", "TV_AV", "VOLUMEUP",
-    "VOLUMEDOWN", "NETFLIX", "YOUTUBE", "PRIME_VIDEO", "ACTION3", "APPS", "FILES", "MUTE","DISCOVERY"
-}
+VALID_KEYS = get_runtime_valid_keys()
 ASR_META_COMMANDS = {"TTS"}
 
 class ExcelValidator:
@@ -27,6 +23,8 @@ class ExcelValidator:
 
         errors = []
         warnings = []
+        valid_keys = {str(key).strip().upper() for key in get_runtime_valid_keys() if str(key).strip()}
+        keycode_keys = {str(key).strip().upper() for key in get_keycode_map().keys() if str(key).strip()}
 
         c_values = []
         for i in range(2, sheet.max_row + 1):
@@ -60,8 +58,14 @@ class ExcelValidator:
 
                     key, count, time_val = parts
                     key = key.upper()
-                    if key not in VALID_KEYS and key not in ASR_META_COMMANDS:
+                    # NON_EXECUTABLE_KEYS（如 ASSERT）作为系统级占位按键，
+                    # 总是视作合法且不要求 keycode 映射
+                    if key in NON_EXECUTABLE_KEYS:
+                        pass
+                    elif key not in valid_keys and key not in ASR_META_COMMANDS:
                         errors.append(f"{col}{row} 按键名称 '{key}' 无效")
+                    elif key not in keycode_keys and key not in ASR_META_COMMANDS:
+                        errors.append(f"{col}{row} 按键名称 '{key}' 缺少键值映射")
 
                     if not count.isdigit() or int(count) <= 0:
                         errors.append(f"{col}{row} 按键次数 '{count}' 必须为正整数")

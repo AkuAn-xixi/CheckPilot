@@ -8,7 +8,7 @@ class ImageVerifier:
     """图片验证器"""
 
     STANDARD_SIZE = (320, 180)
-    TEMPLATE_SCALES = (0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4)
+    TEMPLATE_SCALES = (0.7, 0.85, 1.0, 1.15, 1.3)
     MAX_POST_VERIFY_CANDIDATES = 8
 
     @staticmethod
@@ -184,10 +184,16 @@ class ImageVerifier:
 
     @staticmethod
     def _best_subimage_match(screen_img, reference_img):
+        """用 matchTemplate 在截图中快速定位参考图最佳位置。
+
+        只做模板匹配（快），不做 ORB/structure 等重计算。
+        返回 template_score 最高的候选，后验证由 multi_signal_match 统一完成。
+        """
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
         screen_edges = cv2.Canny(screen_gray, 80, 160)
 
-        candidate_matches = []
+        best_candidate = None
+        best_ts = -1.0
         screen_h, screen_w = screen_gray.shape[:2]
 
         for reference_variant in ImageVerifier._reference_variants(reference_img):
@@ -214,97 +220,39 @@ class ImageVerifier:
                     edge_result = cv2.matchTemplate(screen_edges, ref_edges, cv2.TM_CCOEFF_NORMED)
                     _, edge_score, _, edge_loc = cv2.minMaxLoc(edge_result)
 
-                locations = [(gray_loc, gray_score)]
-                if edge_loc is not None and edge_loc != gray_loc:
-                    locations.append((edge_loc, edge_score))
+                # 取灰度和边缘中更优的位置
+                loc = gray_loc
+                if edge_loc is not None and edge_score > gray_score:
+                    loc = edge_loc
 
-                for loc, location_anchor_score in locations:
-                    candidate_template_score = gray_score * 0.75
-                    if edge_loc is not None:
-                        edge_distance = abs(loc[0] - edge_loc[0]) + abs(loc[1] - edge_loc[1])
-                        gray_distance = abs(loc[0] - gray_loc[0]) + abs(loc[1] - gray_loc[1])
-                        if edge_distance <= gray_distance:
-                            candidate_template_score += edge_score * 0.25
-                        else:
-                            candidate_template_score += max(edge_score * 0.1, 0.0)
+                candidate_template_score = gray_score * 0.75
+                if edge_loc is not None:
+                    candidate_template_score += edge_score * 0.25
 
-                    candidate_matches.append({
-                        "template_score": float(max(0.0, min(1.0, candidate_template_score))),
+                ts = float(max(0.0, min(1.0, candidate_template_score)))
+                if ts > best_ts:
+                    best_ts = ts
+                    best_candidate = {
+                        "template_score": ts,
                         "gray_score": float(max(0.0, min(1.0, gray_score))),
                         "edge_score": float(max(0.0, min(1.0, edge_score))),
-                        "anchor_score": float(max(0.0, min(1.0, location_anchor_score))),
                         "loc": loc,
                         "size": (scaled_w, scaled_h),
                         "reference": scaled_ref,
-                    })
-
-        if candidate_matches:
-            candidate_matches.sort(
-                key=lambda candidate: (candidate["template_score"], candidate["anchor_score"]),
-                reverse=True,
-            )
-
-            deduped_matches = []
-            seen_cells = set()
-            for candidate in candidate_matches:
-                cell = (
-                    candidate["loc"][0] // 8,
-                    candidate["loc"][1] // 8,
-                    candidate["size"][0] // 8,
-                    candidate["size"][1] // 8,
-                )
-                if cell in seen_cells:
-                    continue
-                seen_cells.add(cell)
-                deduped_matches.append(candidate)
-                if len(deduped_matches) >= ImageVerifier.MAX_POST_VERIFY_CANDIDATES:
-                    break
-
-            best_match = None
-            best_score = -1.0
-            for candidate in deduped_matches:
-                x, y = candidate["loc"]
-                w, h = candidate["size"]
-                roi = screen_img[y:y + h, x:x + w]
-                if roi.shape[:2] != candidate["reference"].shape[:2]:
-                    continue
-
-                structure_score = ImageVerifier.calc_structure_similarity(roi, candidate["reference"])
-                feature_score = ImageVerifier.calc_feature_similarity(roi, candidate["reference"])
-                color_score = ImageVerifier.calc_color_hist_similarity(roi, candidate["reference"])
-                final_score = (
-                    candidate["template_score"] * 0.5 +
-                    structure_score * 0.2 +
-                    feature_score * 0.2 +
-                    color_score * 0.1
-                )
-                ranking_score = final_score + structure_score * 0.15 + color_score * 0.05
-
-                if ranking_score > best_score:
-                    best_score = ranking_score
-                    best_match = {
-                        **candidate,
-                        "post_score": float(final_score),
-                        "post_structure_score": float(structure_score),
-                        "post_feature_score": float(feature_score),
-                        "post_color_score": float(color_score),
                     }
 
-            if best_match is not None:
-                return best_match
+        if best_candidate is not None:
+            return best_candidate
 
-        if best_match is None:
-            fallback_ref = cv2.resize(reference_img, (screen_w, screen_h), interpolation=cv2.INTER_AREA)
-            return {
-                "template_score": 0.0,
-                "gray_score": 0.0,
-                "edge_score": 0.0,
-                "loc": (0, 0),
-                "size": (screen_w, screen_h),
-                "reference": fallback_ref,
-            }
-
-        return best_match
+        fallback_ref = cv2.resize(reference_img, (screen_w, screen_h), interpolation=cv2.INTER_AREA)
+        return {
+            "template_score": 0.0,
+            "gray_score": 0.0,
+            "edge_score": 0.0,
+            "loc": (0, 0),
+            "size": (screen_w, screen_h),
+            "reference": fallback_ref,
+        }
 
     @staticmethod
     def multi_signal_match(screen_img, reference_img) -> tuple:
@@ -349,7 +297,7 @@ class ImageVerifier:
 
     def _build_result(self, img_screen, img_icon, threshold: float) -> Dict[str, Any]:
         final_score, template_score, color_score, feature_score, structure_score = self.multi_signal_match(img_screen, img_icon)
-        required_score = max(float(threshold), 0.9)
+        required_score = float(threshold)
         strict_match = (
             final_score >= required_score and
             template_score >= 0.55 and

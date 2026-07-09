@@ -47,7 +47,13 @@ htmlcov/
 # 本地运行产物
 runtime_state.json
 asr_runtime_state.json
+image_compare_runtime_state.json
 customization.json
 adbcontrol_port.txt
 screenshots/
+log/
+recordings/
+reports/
+image_models/
 .venv-py314-freeze.txt
+.build_tools/

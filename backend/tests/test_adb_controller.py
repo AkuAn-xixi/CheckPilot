@@ -1,5 +1,7 @@
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -124,6 +126,41 @@ class ReadLastTtsTextTests(unittest.TestCase):
             result = self.controller.get_last_tts_text()
 
         self.assertIsNone(result)
+
+
+class CommandExecutionStopTests(unittest.TestCase):
+    def test_execute_commands_stops_during_delay(self):
+        controller = ADBController()
+        controller.select_device("device-123")
+        results_holder = {}
+        adb_calls = []
+
+        def fake_run(command, shell=False, check=False, **kwargs):
+            adb_calls.append(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        def run_commands():
+            results_holder["results"] = controller.execute_commands("OK/1/1,DOWN/1/0")
+
+        with mock.patch("backend.app.utils.adb_controller.subprocess.run", side_effect=fake_run):
+            worker = threading.Thread(target=run_commands)
+            started = time.perf_counter()
+            worker.start()
+            time.sleep(0.15)
+            self.assertTrue(controller.request_stop())
+            worker.join(timeout=2)
+            elapsed = time.perf_counter() - started
+
+        self.assertFalse(worker.is_alive())
+        self.assertLess(elapsed, 0.8)
+        self.assertEqual(len(adb_calls), 1)
+        self.assertEqual(
+            results_holder["results"],
+            [
+                {"status": "success", "message": "已发送: OK"},
+                {"status": "info", "message": "命令执行已停止"},
+            ],
+        )
 
 
 if __name__ == "__main__":

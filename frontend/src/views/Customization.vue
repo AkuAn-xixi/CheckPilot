@@ -1,7 +1,7 @@
 <template>
   <div class="card">
-    <h2 class="mb-1">客制化配置</h2>
-    <p class="text-sm text-gray-500 mb-5">每个方案拥有独立的合法按键名称与键值映射，激活方案在运行时生效。</p>
+    <h2 class="mb-1">{{ $t('customization.title') }}</h2>
+    <p class="text-sm text-gray-500 mb-5">{{ $t('customization.subtitle') }}</p>
     <section class="config-section mb-4">
       <div class="scheme-header">
         <div class="scheme-tabs-wrap">
@@ -13,42 +13,91 @@
               @click="selectScheme(s.name)"
             >
               <span class="scheme-tab-name">{{ s.name }}</span>
-              <span v-if="s.is_active" class="scheme-active-badge">激活</span>
+              <span v-if="s.is_active" class="scheme-active-badge">{{ $t('customization.activeBadge') }}</span>
             </button>
           </div>
-          <p v-if="schemes.length === 0" class="text-sm text-gray-400">暂无方案，请新建。</p>
+          <p v-if="schemes.length === 0" class="text-sm text-gray-400">{{ $t('customization.noSchemes') }}</p>
         </div>
         <div class="scheme-btns">
-          <button class="btn btn-secondary btn-sm" @click="showCreateModal = true">＋ 新建</button>
-          <button class="btn btn-secondary btn-sm" @click="showDuplicateModal = true" :disabled="!selectedScheme">复制</button>
-          <button class="btn btn-danger btn-sm" @click="confirmDeleteScheme" :disabled="!selectedScheme || schemes.length <= 1">删除</button>
+          <button class="btn btn-secondary btn-sm" @click="showCreateModal = true">{{ $t('customization.createScheme') }}</button>
+          <button class="btn btn-secondary btn-sm" @click="showDuplicateModal = true" :disabled="!selectedScheme">{{ $t('customization.duplicate') }}</button>
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="excelImporting"
+            @click="triggerExcelImport"
+            :title="$t('customization.importFromExcelTitle')"
+          >
+            {{ excelImporting ? $t('customization.importFromExcelLoading') : $t('customization.importFromExcel') }}
+          </button>
+          <input
+            ref="excelImportInput"
+            type="file"
+            accept=".xlsx,.xlsm"
+            class="hidden"
+            @change="onExcelImportFileChange"
+          >
+          <button class="btn btn-danger btn-sm" @click="confirmDeleteScheme" :disabled="!selectedScheme || schemes.length <= 1">{{ $t('customization.delete') }}</button>
         </div>
       </div>
       <div v-if="selectedScheme" class="scheme-status-row">
         <span class="text-sm text-gray-500">
-          正在编辑：<strong>{{ selectedScheme }}</strong>
+          {{ $t('customization.editingScheme') }} <strong>{{ selectedScheme }}</strong>
         </span>
         <button
           v-if="activeScheme !== selectedScheme"
           class="btn btn-primary btn-sm"
           @click="activateCurrentScheme"
         >
-          设为激活方案
+          {{ $t('customization.setActive') }}
         </button>
-        <span v-else class="active-hint">✓ 当前已激活</span>
+        <span v-else class="active-hint">{{ $t('customization.currentActive') }}</span>
+      </div>
+      <div v-if="excelImportError" class="status-bar error mt-3">{{ excelImportError }}</div>
+      <div v-else-if="excelImportMessage" class="status-bar success mt-3">{{ excelImportMessage }}</div>
+    </section>
+
+    <section class="config-section mb-4">
+      <div class="section-header">
+        <div>
+          <h3 class="section-title">{{ $t('customization.extraDelay') }}</h3>
+          <p class="section-desc">{{ $t('customization.extraDelayDesc') }}</p>
+        </div>
+        <div class="section-actions">
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="extraDelayLoading || !extraDelayDirty"
+            @click="saveExtraDelay"
+          >
+            {{ extraDelayLoading ? $t('customization.saving') : $t('customization.saveChanges') }}
+          </button>
+        </div>
+      </div>
+      <div v-if="extraDelayStatusMsg" :class="['status-bar', extraDelayStatusType]">{{ extraDelayStatusMsg }}</div>
+      <div class="extra-delay-row">
+        <input
+          v-model.number="extraDelayDraft"
+          type="number"
+          min="0"
+          step="0.5"
+          class="form-input"
+          style="width: 140px;"
+        >
+        <span class="text-sm text-gray-500">{{ $t('customization.extraDelaySeconds') }}</span>
+        <span class="text-xs text-gray-400 ml-3">{{ $t('customization.extraDelayHint', { example: extraDelayExampleHint }) }}</span>
       </div>
     </section>
+
     <template v-if="selectedScheme">
       <section class="config-section mb-4">
         <div class="section-header">
           <div>
-            <h3 class="section-title">合法按键名称</h3>
-            <p class="section-desc">Excel 校验及按键监听中允许使用的按键集合。修改后立即生效于后续校验。</p>
+            <h3 class="section-title">{{ $t('customization.validKeys') }}</h3>
+            <p class="section-desc">{{ $t('customization.validKeysDesc') }}</p>
           </div>
           <div class="section-actions">
-            <button class="btn btn-secondary btn-sm" @click="confirmReset" :disabled="loading">恢复默认</button>
+            <button class="btn btn-secondary btn-sm" @click="confirmReset" :disabled="loading">{{ $t('customization.restoreDefault') }}</button>
             <button class="btn btn-primary btn-sm" @click="saveKeys" :disabled="loading || !dirty">
-              {{ loading ? '保存中…' : '保存更改' }}
+              {{ loading ? $t('customization.saving') : $t('customization.saveChanges') }}
             </button>
           </div>
         </div>
@@ -57,12 +106,12 @@
           <input
             v-model="newKey"
             class="form-input add-input"
-            placeholder="输入新按键名称，如 MY_KEY"
+            :placeholder="$t('customization.addKeyPlaceholder')"
             @keydown.enter.prevent="addKey"
             @input="newKey = newKey.toUpperCase()"
             maxlength="40"
           />
-          <button class="btn btn-primary btn-sm" @click="addKey" :disabled="!newKey.trim()">添加</button>
+          <button class="btn btn-primary btn-sm" @click="addKey" :disabled="!newKey.trim()">{{ $t('customization.add') }}</button>
         </div>
         <div v-if="keys.length" class="keys-grid">
           <span
@@ -72,20 +121,20 @@
             :class="{ 'key-tag-new': addedKeys.has(key) }"
           >
             {{ key }}
-            <button class="tag-remove" @click="removeKey(key)" title="移除">×</button>
+            <button class="tag-remove" @click="removeKey(key)" :title="$t('customization.tooltips.remove')">×</button>
           </span>
         </div>
-        <p v-else class="text-sm text-gray-400 mt-4">暂无按键，请添加。</p>
-        <p class="key-count">共 {{ keys.length }} 个按键</p>
+        <p v-else class="text-sm text-gray-400 mt-4">{{ $t('customization.noKeys') }}</p>
+        <p class="key-count">{{ $t('customization.keyCount', { count: keys.length }) }}</p>
       </section>
       <section class="config-section">
         <div class="section-header">
           <div>
-            <h3 class="section-title">按键键值映射</h3>
-            <p class="section-desc">定义每个按键名称对应的 ADB keycode 数值。蓝色行为自定义覆盖，其余为系统默认。</p>
+            <h3 class="section-title">{{ $t('customization.keyCodeMapping') }}</h3>
+            <p class="section-desc">{{ $t('customization.keyCodeDesc') }}</p>
           </div>
           <div class="section-actions">
-            <button class="btn btn-secondary btn-sm" @click="confirmResetCodes" :disabled="kcLoading">恢复默认</button>
+            <button class="btn btn-secondary btn-sm" @click="confirmResetCodes" :disabled="kcLoading">{{ $t('customization.restoreDefault') }}</button>
           </div>
         </div>
         <div v-if="kcStatusMsg" :class="['status-bar', kcStatusType]">{{ kcStatusMsg }}</div>
@@ -93,7 +142,7 @@
           <input
             v-model="kcNewName"
             class="form-input add-input"
-            placeholder="按键名，如 MY_KEY"
+            :placeholder="$t('customization.keyNamePlaceholder')"
             @input="kcNewName = kcNewName.toUpperCase()"
             maxlength="40"
           />
@@ -103,17 +152,17 @@
             style="width:100px;"
             type="number"
             min="0"
-            placeholder="键值"
+            :placeholder="$t('customization.keyCodePlaceholder')"
           />
-          <button class="btn btn-primary btn-sm" @click="addKeyCode" :disabled="!kcNewName.trim() || kcNewCode === ''">添加/覆盖</button>
+          <button class="btn btn-primary btn-sm" @click="addKeyCode" :disabled="!kcNewName.trim() || kcNewCode === ''">{{ $t('customization.addOrOverride') }}</button>
         </div>
         <div class="kc-table-wrap">
           <table class="kc-table">
             <thead>
               <tr>
-                <th>按键名称</th>
-                <th>键值 (keycode)</th>
-                <th>类型</th>
+                <th>{{ $t('customization.columns.keyName') }}</th>
+                <th>{{ $t('customization.columns.keyCode') }}</th>
+                <th>{{ $t('customization.columns.type') }}</th>
                 <th style="width:60px;"></th>
               </tr>
             </thead>
@@ -137,93 +186,93 @@
                   />
                 </td>
                 <td>
-                  <span v-if="customOverrides[name] !== undefined" class="badge-custom">自定义</span>
-                  <span v-else class="badge-default">默认</span>
+                  <span v-if="customOverrides[name] !== undefined" class="badge-custom">{{ $t('customization.custom') }}</span>
+                  <span v-else class="badge-default">{{ $t('customization.default') }}</span>
                 </td>
                 <td class="kc-actions">
                   <template v-if="!editingKey || editingKey !== name">
-                    <button class="act-btn" @click="startEdit(name, code)" title="编辑">✎</button>
+                    <button class="act-btn" @click="startEdit(name, code)" :title="$t('customization.tooltips.edit')">✎</button>
                     <button
                       v-if="customOverrides[name] !== undefined"
                       class="act-btn act-del"
                       @click="deleteOverride(name)"
-                      title="恢复默认"
+                      :title="$t('customization.tooltips.restoreDefault')"
                     >↩</button>
                   </template>
                   <template v-else>
-                    <button class="act-btn act-ok" @click="commitEdit(name)" title="确认">✓</button>
-                    <button class="act-btn" @click="editingKey = null" title="取消">✕</button>
+                    <button class="act-btn act-ok" @click="commitEdit(name)" :title="$t('customization.tooltips.confirm')">✓</button>
+                    <button class="act-btn" @click="editingKey = null" :title="$t('customization.tooltips.cancel')">✕</button>
                   </template>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="key-count">共 {{ sortedKeyCodes.length }} 条映射，{{ Object.keys(customOverrides).length }} 条自定义覆盖</p>
+        <p class="key-count">{{ $t('customization.mappingCount', { total: sortedKeyCodes.length, custom: Object.keys(customOverrides).length }) }}</p>
       </section>
     </template>
     <div v-if="showCreateModal" class="modal-backdrop" @click.self="showCreateModal = false">
       <div class="modal-box">
-        <h4 class="modal-title">新建方案</h4>
+        <h4 class="modal-title">{{ $t('customization.createModalTitle') }}</h4>
         <input
           v-model="newSchemeName"
           class="form-input mt-3"
-          placeholder="方案名称"
+          :placeholder="$t('customization.createModalPlaceholder')"
           maxlength="30"
           @keydown.enter="doCreateScheme"
           ref="createInput"
         />
         <div v-if="createError" class="status-bar error mt-2">{{ createError }}</div>
         <div class="modal-footer">
-          <button class="btn btn-secondary btn-sm" @click="showCreateModal = false">取消</button>
-          <button class="btn btn-primary btn-sm" @click="doCreateScheme" :disabled="!newSchemeName.trim()">创建</button>
+          <button class="btn btn-secondary btn-sm" @click="showCreateModal = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-primary btn-sm" @click="doCreateScheme" :disabled="!newSchemeName.trim()">{{ $t('customization.create') }}</button>
         </div>
       </div>
     </div>
     <div v-if="showDuplicateModal" class="modal-backdrop" @click.self="showDuplicateModal = false">
       <div class="modal-box">
-        <h4 class="modal-title">复制方案「{{ selectedScheme }}」</h4>
+        <h4 class="modal-title">{{ $t('customization.duplicateModalTitle', { name: selectedScheme }) }}</h4>
         <input
           v-model="duplicateName"
           class="form-input mt-3"
-          placeholder="新方案名称"
+          :placeholder="$t('customization.duplicateModalPlaceholder')"
           maxlength="30"
           @keydown.enter="doDuplicateScheme"
         />
         <div v-if="duplicateError" class="status-bar error mt-2">{{ duplicateError }}</div>
         <div class="modal-footer">
-          <button class="btn btn-secondary btn-sm" @click="showDuplicateModal = false">取消</button>
-          <button class="btn btn-primary btn-sm" @click="doDuplicateScheme" :disabled="!duplicateName.trim()">复制</button>
+          <button class="btn btn-secondary btn-sm" @click="showDuplicateModal = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-primary btn-sm" @click="doDuplicateScheme" :disabled="!duplicateName.trim()">{{ $t('customization.duplicate') }}</button>
         </div>
       </div>
     </div>
     <div v-if="showDeleteConfirm" class="modal-backdrop" @click.self="showDeleteConfirm = false">
       <div class="modal-box">
-        <h4 class="modal-title">确认删除方案？</h4>
-        <p class="modal-body">将永久删除方案「<strong>{{ selectedScheme }}</strong>」及其所有配置，此操作不可撤销。</p>
+        <h4 class="modal-title">{{ $t('customization.deleteModalTitle') }}</h4>
+        <p class="modal-body">{{ $t('customization.deleteModalBody', { name: selectedScheme }) }}</p>
         <div class="modal-footer">
-          <button class="btn btn-secondary btn-sm" @click="showDeleteConfirm = false">取消</button>
-          <button class="btn btn-danger btn-sm" @click="doDeleteScheme">确认删除</button>
+          <button class="btn btn-secondary btn-sm" @click="showDeleteConfirm = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-danger btn-sm" @click="doDeleteScheme">{{ $t('customization.confirmDelete') }}</button>
         </div>
       </div>
     </div>
     <div v-if="showResetConfirm" class="modal-backdrop" @click.self="showResetConfirm = false">
       <div class="modal-box">
-        <h4 class="modal-title">确认恢复默认？</h4>
-        <p class="modal-body">将清除「{{ selectedScheme }}」中的自定义按键并还原为系统默认列表，此操作不可撤销。</p>
+        <h4 class="modal-title">{{ $t('customization.resetKeysTitle') }}</h4>
+        <p class="modal-body">{{ $t('customization.resetKeysBody', { name: selectedScheme }) }}</p>
         <div class="modal-footer">
-          <button class="btn btn-secondary btn-sm" @click="showResetConfirm = false">取消</button>
-          <button class="btn btn-danger btn-sm" @click="doReset">确认恢复</button>
+          <button class="btn btn-secondary btn-sm" @click="showResetConfirm = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-danger btn-sm" @click="doReset">{{ $t('customization.confirmRestore') }}</button>
         </div>
       </div>
     </div>
     <div v-if="showResetCodesConfirm" class="modal-backdrop" @click.self="showResetCodesConfirm = false">
       <div class="modal-box">
-        <h4 class="modal-title">确认恢复默认键值？</h4>
-        <p class="modal-body">将清除「{{ selectedScheme }}」中的所有自定义键值并还原为系统默认映射表，此操作不可撤销。</p>
+        <h4 class="modal-title">{{ $t('customization.resetCodesTitle') }}</h4>
+        <p class="modal-body">{{ $t('customization.resetCodesBody', { name: selectedScheme }) }}</p>
         <div class="modal-footer">
-          <button class="btn btn-secondary btn-sm" @click="showResetCodesConfirm = false">取消</button>
-          <button class="btn btn-danger btn-sm" @click="doResetCodes">确认恢复</button>
+          <button class="btn btn-secondary btn-sm" @click="showResetCodesConfirm = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-danger btn-sm" @click="doResetCodes">{{ $t('customization.confirmRestore') }}</button>
         </div>
       </div>
     </div>
@@ -232,6 +281,10 @@
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const schemes = ref([])
 const activeScheme = ref('')
@@ -245,6 +298,148 @@ const createError = ref('')
 const duplicateError = ref('')
 const createInput = ref(null)
 
+// Excel 导入状态
+const excelImportInput = ref(null)
+const excelImporting = ref(false)
+const excelImportError = ref('')
+const excelImportMessage = ref('')
+let excelImportMessageTimer = null
+
+// 全局命令延迟增量（秒）
+const extraDelaySaved = ref(0)
+const extraDelayDraft = ref(0)
+const extraDelayLoading = ref(false)
+const extraDelayStatusMsg = ref('')
+const extraDelayStatusType = ref('info')
+let extraDelayStatusTimer = null
+
+const extraDelayDirty = computed(() => {
+  const draft = Number(extraDelayDraft.value)
+  if (Number.isNaN(draft)) return false
+  return Math.abs(draft - extraDelaySaved.value) > 1e-9
+})
+const extraDelayExampleHint = computed(() => {
+  const draft = Number(extraDelayDraft.value)
+  if (!Number.isFinite(draft) || draft <= 0) return '0'
+  // 给用户一个直观例子：2 + draft
+  return (2 + draft).toFixed(draft % 1 === 0 ? 0 : 1)
+})
+
+function showExtraDelayStatus(msg, type = 'success') {
+  extraDelayStatusMsg.value = msg
+  extraDelayStatusType.value = type
+  if (extraDelayStatusTimer) {
+    clearTimeout(extraDelayStatusTimer)
+  }
+  extraDelayStatusTimer = setTimeout(() => {
+    extraDelayStatusMsg.value = ''
+  }, 3000)
+}
+
+async function fetchExtraDelay() {
+  try {
+    const res = await fetch('/api/customization/extra-command-delay')
+    if (!res.ok) return
+    const data = await res.json()
+    const value = Number(data?.extra_command_delay) || 0
+    extraDelaySaved.value = value
+    extraDelayDraft.value = value
+  } catch {}
+}
+
+async function saveExtraDelay() {
+  let next = Number(extraDelayDraft.value)
+  if (!Number.isFinite(next) || next < 0) {
+    next = 0
+  }
+  extraDelayLoading.value = true
+  try {
+    const res = await fetch('/api/customization/extra-command-delay', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extra_command_delay: next })
+    })
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      throw new Error(e.detail || t('customization.status.saveFailed'))
+    }
+    const data = await res.json()
+    const saved = Number(data?.extra_command_delay) || 0
+    extraDelaySaved.value = saved
+    extraDelayDraft.value = saved
+    showExtraDelayStatus(t('customization.status.saveSuccess'), 'success')
+  } catch (error) {
+    showExtraDelayStatus(error?.message || t('customization.status.saveFailed'), 'error')
+  } finally {
+    extraDelayLoading.value = false
+  }
+}
+
+function showExcelImportSuccess(message) {
+  excelImportError.value = ''
+  excelImportMessage.value = message
+  if (excelImportMessageTimer) {
+    clearTimeout(excelImportMessageTimer)
+  }
+  excelImportMessageTimer = setTimeout(() => {
+    excelImportMessage.value = ''
+  }, 5000)
+}
+
+function triggerExcelImport() {
+  excelImportError.value = ''
+  excelImportMessage.value = ''
+  if (excelImportInput.value) {
+    excelImportInput.value.value = ''
+  }
+  excelImportInput.value?.click()
+}
+
+async function onExcelImportFileChange(event) {
+  const file = event?.target?.files?.[0]
+  if (!file) return
+  excelImporting.value = true
+  excelImportError.value = ''
+  excelImportMessage.value = ''
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('conflict', 'rename')
+    const res = await fetch('/api/customization/schemes/import-excel', {
+      method: 'POST',
+      body: formData,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data?.detail || t('customization.importFromExcelFailed'))
+    }
+    await fetchSchemes()
+    if (data.imported_scheme) {
+      selectedScheme.value = data.imported_scheme
+    }
+    let message = ''
+    if (data.skipped) {
+      message = t('customization.importExcelSkipped', { count: data.key_codes_count })
+    } else if (data.renamed_from) {
+      message = t('customization.importExcelRenamed', {
+        original: data.renamed_from,
+        saved_as: data.imported_scheme,
+        count: data.key_codes_count,
+      })
+    } else {
+      message = t('customization.importExcelSuccess', {
+        name: data.imported_scheme,
+        count: data.key_codes_count,
+      })
+    }
+    showExcelImportSuccess(message)
+  } catch (error) {
+    excelImportError.value = error?.message || t('customization.importFromExcelFailed')
+  } finally {
+    excelImporting.value = false
+  }
+}
+
 async function fetchSchemes() {
   try {
     const res = await fetch('/api/customization/schemes')
@@ -252,13 +447,14 @@ async function fetchSchemes() {
     schemes.value = data.schemes || []
     activeScheme.value = data.active_scheme || ''
     if (!selectedScheme.value || !schemes.value.find(s => s.name === selectedScheme.value)) {
-      selectedScheme.value = schemes.value[0]?.name || ''
+      selectedScheme.value = activeScheme.value || schemes.value[0]?.name || ''
     }
   } catch { }
 }
 
 function selectScheme(name) {
   if (selectedScheme.value === name) return
+  if (!confirmDiscardUnsavedChanges()) return
   selectedScheme.value = name
 }
 
@@ -284,12 +480,12 @@ async function doCreateScheme() {
       body: JSON.stringify({ name })
     })
     const data = await res.json()
-    if (!res.ok) { createError.value = data.detail || '创建失败'; return }
+    if (!res.ok) { createError.value = data.detail || t('customization.status.createFailed'); return }
     showCreateModal.value = false
     newSchemeName.value = ''
     await fetchSchemes()
     selectedScheme.value = name
-  } catch { createError.value = '请求失败' }
+  } catch { createError.value = t('customization.status.requestFailed') }
 }
 
 function confirmDeleteScheme() { showDeleteConfirm.value = true }
@@ -317,12 +513,12 @@ async function doDuplicateScheme() {
       body: JSON.stringify({ new_name: newName })
     })
     const data = await res.json()
-    if (!res.ok) { duplicateError.value = data.detail || '复制失败'; return }
+    if (!res.ok) { duplicateError.value = data.detail || t('customization.status.duplicateFailed'); return }
     showDuplicateModal.value = false
     duplicateName.value = ''
     await fetchSchemes()
     selectedScheme.value = newName
-  } catch { duplicateError.value = '请求失败' }
+  } catch { duplicateError.value = t('customization.status.requestFailed') }
 }
 
 watch(showCreateModal, async (v) => {
@@ -357,7 +553,7 @@ async function fetchKeys() {
     dirty.value = false
     addedKeys.value = new Set()
   } catch {
-    showStatus('加载按键列表失败', 'error')
+    showStatus(t('customization.status.loadKeysFailed'), 'error')
   } finally {
     loading.value = false
   }
@@ -366,7 +562,7 @@ async function fetchKeys() {
 function addKey() {
   const k = newKey.value.trim().toUpperCase()
   if (!k) return
-  if (keys.value.includes(k)) { showStatus(`"${k}" 已存在`, 'warning'); return }
+  if (keys.value.includes(k)) { showStatus(t('customization.status.keyExists', { name: k }), 'warning'); return }
   keys.value = [...keys.value, k].sort()
   addedKeys.value = new Set([...addedKeys.value, k])
   newKey.value = ''
@@ -387,14 +583,14 @@ async function saveKeys() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keys: keys.value })
     })
-    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '保存失败') }
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || t('customization.status.saveFailed')) }
     const data = await res.json()
     keys.value = data.keys
     dirty.value = false
     addedKeys.value = new Set()
-    showStatus('保存成功')
+    showStatus(t('customization.status.saveSuccess'))
   } catch (e) {
-    showStatus(e.message || '保存失败', 'error')
+    showStatus(e.message || t('customization.status.saveFailed'), 'error')
   } finally {
     loading.value = false
   }
@@ -410,8 +606,8 @@ async function doReset() {
     keys.value = data.keys
     dirty.value = false
     addedKeys.value = new Set()
-    showStatus('已恢复为默认按键列表')
-  } catch { showStatus('恢复失败', 'error') } finally { loading.value = false }
+    showStatus(t('customization.status.restoreKeysSuccess'))
+  } catch { showStatus(t('customization.status.restoreFailed'), 'error') } finally { loading.value = false }
 }
 
 const keyCodes = ref({})
@@ -424,7 +620,39 @@ const kcNewName = ref('')
 const kcNewCode = ref('')
 const editingKey = ref(null)
 const editingCode = ref(0)
+const editingOriginalCode = ref(null)
 let kcTimer = null
+
+const hasPendingKeyCodeDraft = computed(() => {
+  const hasNewKeyNameDraft = kcNewName.value.trim().length > 0
+  const hasNewKeyCodeDraft = kcNewCode.value !== '' && kcNewCode.value !== null && kcNewCode.value !== undefined
+  const hasInlineEditDraft = editingKey.value !== null && Number(editingCode.value) !== Number(editingOriginalCode.value)
+  return hasNewKeyNameDraft || hasNewKeyCodeDraft || hasInlineEditDraft
+})
+
+const hasUnsavedChanges = computed(() => dirty.value || hasPendingKeyCodeDraft.value)
+
+function discardUnsavedChanges() {
+  dirty.value = false
+  addedKeys.value = new Set()
+  newKey.value = ''
+  kcNewName.value = ''
+  kcNewCode.value = ''
+  editingKey.value = null
+  editingOriginalCode.value = null
+}
+
+function confirmDiscardUnsavedChanges() {
+  if (!hasUnsavedChanges.value) {
+    return true
+  }
+
+  const confirmed = window.confirm(t('customization.alerts.unsavedChangesConfirm'))
+  if (confirmed) {
+    discardUnsavedChanges()
+  }
+  return confirmed
+}
 
 function showKcStatus(msg, type = 'success') {
   kcStatusMsg.value = msg
@@ -446,7 +674,7 @@ async function fetchKeyCodes() {
     keyCodes.value = data.key_codes || {}
     customOverrides.value = data.custom_overrides || {}
   } catch {
-    showKcStatus('加载键值映射失败', 'error')
+    showKcStatus(t('customization.status.loadKeyCodesFailed'), 'error')
   } finally {
     kcLoading.value = false
   }
@@ -461,12 +689,17 @@ async function addKeyCode() {
   kcNewCode.value = ''
 }
 
-function startEdit(name, code) { editingKey.value = name; editingCode.value = code }
+function startEdit(name, code) {
+  editingKey.value = name
+  editingCode.value = code
+  editingOriginalCode.value = code
+}
 
 async function commitEdit(name) {
   const code = Number(editingCode.value)
-  if (isNaN(code) || code < 0) { showKcStatus('键值必须为非负整数', 'warning'); return }
+  if (isNaN(code) || code < 0) { showKcStatus(t('customization.status.nonNegativeCode'), 'warning'); return }
   editingKey.value = null
+  editingOriginalCode.value = null
   await saveOverride(name, code)
 }
 
@@ -479,13 +712,13 @@ async function saveOverride(name, code) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key_codes: updated })
     })
-    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '保存失败') }
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || t('customization.status.saveFailed')) }
     const data = await res.json()
     keyCodes.value = data.key_codes
     customOverrides.value = data.custom_overrides
-    showKcStatus('键值已保存')
+    showKcStatus(t('customization.status.keyCodeSaved'))
   } catch (e) {
-    showKcStatus(e.message || '保存失败', 'error')
+    showKcStatus(e.message || t('customization.status.saveFailed'), 'error')
   } finally {
     kcLoading.value = false
   }
@@ -498,12 +731,16 @@ async function deleteOverride(name) {
       `/api/customization/schemes/${encodeURIComponent(selectedScheme.value)}/key-codes/${encodeURIComponent(name)}`,
       { method: 'DELETE' }
     )
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      throw new Error(e.detail || t('customization.status.deleteFailed'))
+    }
     const data = await res.json()
     keyCodes.value = data.key_codes
     customOverrides.value = data.custom_overrides
-    showKcStatus(`"${name}" 已还原为默认键值`)
-  } catch {
-    showKcStatus('删除失败', 'error')
+    showKcStatus(t('customization.status.restoredDefaultKeyCode', { name }))
+  } catch (e) {
+    showKcStatus(e.message || t('customization.status.deleteFailed'), 'error')
   } finally {
     kcLoading.value = false
   }
@@ -518,11 +755,15 @@ async function doResetCodes() {
       `/api/customization/schemes/${encodeURIComponent(selectedScheme.value)}/key-codes/reset`,
       { method: 'POST' }
     )
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      throw new Error(e.detail || t('customization.status.restoreFailed'))
+    }
     const data = await res.json()
     keyCodes.value = data.key_codes
     customOverrides.value = data.custom_overrides
-    showKcStatus('已恢复为全部默认键值')
-  } catch { showKcStatus('恢复失败', 'error') } finally { kcLoading.value = false }
+    showKcStatus(t('customization.status.restoreKeyCodeSuccess'))
+  } catch (e) { showKcStatus(e.message || t('customization.status.restoreFailed'), 'error') } finally { kcLoading.value = false }
 }
 
 watch(selectedScheme, (name) => {
@@ -531,6 +772,7 @@ watch(selectedScheme, (name) => {
   kcStatusMsg.value = ''
   dirty.value = false
   editingKey.value = null
+  editingOriginalCode.value = null
   fetchKeys()
   fetchKeyCodes()
 })
@@ -541,6 +783,16 @@ onMounted(async () => {
     fetchKeys()
     fetchKeyCodes()
   }
+  await fetchExtraDelay()
+})
+
+onBeforeRouteLeave((to, from, next) => {
+  if (confirmDiscardUnsavedChanges()) {
+    next()
+    return
+  }
+
+  next(false)
 })
 </script>
 
@@ -595,6 +847,13 @@ onMounted(async () => {
 .status-bar.warning { background: #fffbeb; color: #92400e; }
 .status-bar.info    { background: #eff6ff; color: #1e40af; }
 .add-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.extra-delay-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
 .add-input { flex: 1; max-width: 300px; font-family: 'Courier New', monospace; text-transform: uppercase; }
 .keys-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .key-tag {

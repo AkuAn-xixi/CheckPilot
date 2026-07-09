@@ -5,6 +5,7 @@ import CommandExecution from '../views/CommandExecution.vue'
 import Customization from '../views/Customization.vue'
 import ExcelExecution from '../views/ExcelExecution.vue'
 import KeyMonitor from '../views/KeyMonitor.vue'
+import Reports from '../views/Reports.vue'
 import ExcelFeatureLayout from '../views/excel/ExcelFeatureLayout.vue'
 import ExcelAsrAutomation from '../views/excel/ExcelAsrAutomation.vue'
 
@@ -44,6 +45,11 @@ const routes = [
     path: '/keymonitor',
     name: 'KeyMonitor',
     component: KeyMonitor
+  },
+  {
+    path: '/reports',
+    name: 'Reports',
+    component: Reports
   },
   {
     path: '/customization',

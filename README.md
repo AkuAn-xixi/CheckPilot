@@ -227,9 +227,17 @@ build_exe.bat
 
 脚本会自动完成：
 
-- 安装前端依赖并执行生产构建
-- 安装后端依赖和 PyInstaller
+- 通过国内镜像源安装前端依赖并执行生产构建
+- 通过国内镜像源安装后端依赖和 PyInstaller
 - 基于 `ADBControl.spec` 构建单文件 exe
+
+`build_exe.bat` 默认使用以下中国国内镜像源：
+
+- `pip`：清华大学 PyPI 镜像 `https://pypi.tuna.tsinghua.edu.cn/simple`
+- `npm`：`https://registry.npmmirror.com`
+- `ADBCONTROL_PIP_INDEX_URL`：自定义 pip 镜像地址
+- `ADBCONTROL_PIP_TRUSTED_HOST`：自定义 pip trusted-host
+- `ADBCONTROL_NPM_REGISTRY`：自定义 npm registry
 
 ### 直接使用 PyInstaller
 

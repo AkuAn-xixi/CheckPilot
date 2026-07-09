@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from backend.app.api import asr
@@ -55,7 +57,7 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(asr.asr_service, "get_active_model", return_value={"name": "demo", "path": "demo"}), \
              mock.patch.object(asr.asr_service, "get_runtime_dependency_status", return_value={"missing": ["sounddevice"], "ready": False, "available": {}}):
             events = []
-            async for payload in asr.execute_asr_commands_stream(request, 1, valid_rows):
+            async for payload in asr.execute_asr_commands_stream(request, "demo.xlsx", 1, valid_rows):
                 events.append(parse_sse_payload(payload))
 
         self.assertEqual(len(events), 1)
@@ -89,7 +91,7 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
              mock.patch("backend.app.api.asr.wait_with_cancellation", new=_noop_wait), \
              mock.patch("backend.app.api.asr.stream_row_command_events", new=_fake_stream_row_command_events):
             events = []
-            async for payload in asr.execute_asr_commands_stream(request, 1, valid_rows):
+            async for payload in asr.execute_asr_commands_stream(request, "demo.xlsx", 1, valid_rows):
                 events.append(parse_sse_payload(payload))
 
         self.assertTrue(recorder.started)
@@ -133,7 +135,7 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
              mock.patch("backend.app.api.asr.wait_with_cancellation", new=_noop_wait), \
              mock.patch("backend.app.api.asr.stream_row_command_events", new=fake_stream):
             events = []
-            async for payload in asr.execute_asr_commands_stream(request, 1, valid_rows):
+            async for payload in asr.execute_asr_commands_stream(request, "demo.xlsx", 1, valid_rows):
                 events.append(parse_sse_payload(payload))
 
         self.assertTrue(recorder.started)
@@ -170,17 +172,16 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
              mock.patch("backend.app.api.asr.wait_with_cancellation", new=_noop_wait), \
              mock.patch("backend.app.api.asr.stream_row_command_events", new=_fake_stream_row_command_events):
             events = []
-            async for payload in asr.execute_asr_commands_stream(request, 1, valid_rows):
+            async for payload in asr.execute_asr_commands_stream(request, "demo.xlsx", 1, valid_rows):
                 events.append(parse_sse_payload(payload))
 
-        compare_mock.assert_called_once_with("hello world", "hello world")
+        compare_mock.assert_called_once_with("hello world", "hello world", threshold=0.85)
         self.assertTrue(any("改用 TTS 输出文本进行比对" in event.get("message", "") for event in events))
         final_event = events[-1]
         self.assertEqual(final_event["status"], "success")
         self.assertEqual(final_event["comparison_source"], "tts")
         self.assertEqual(final_event["reference_text"], "hello world")
         self.assertEqual(final_event["tts_text"], "hello world")
-
 
 if __name__ == "__main__":
     unittest.main()

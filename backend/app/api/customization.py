@@ -21,7 +21,7 @@ DEFAULT_VALID_KEYS: List[str] = sorted([
     'DIGITAL1', 'DIGITAL2', 'DIGITAL3', 'DIGITAL4', 'DIGITAL5', 'DIGITAL6',
     'DIGITAL7', 'DIGITAL8', 'DIGITAL9', 'LIBRARY', 'TV_AV', 'VOLUMEUP',
     'VOLUMEDOWN', 'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'ACTION3', 'APPS',
-    'FILES', 'MUTE', 'DISCOVERY', 'ASSERT',
+    'FILES', 'MUTE', 'DISCOVERY', 'ASSERT', 'NOTASSERT',
 ])
 
 
@@ -33,6 +33,10 @@ class ValidKeysUpdateRequest(BaseModel):
 
 class KeyCodesUpdateRequest(BaseModel):
     key_codes: Dict[str, int]
+
+
+class CustomCommandsUpdateRequest(BaseModel):
+    custom_commands: Dict[str, str]
 
 
 class CreateSchemeRequest(BaseModel):
@@ -59,6 +63,38 @@ def _normalize_extra_delay(value) -> float:
     return delay
 
 
+DEFAULT_COLOR_MIN_SIMILARITY = 0.4
+DEFAULT_COLOR_WEIGHT = 0.2
+DEFAULT_FEATURE_MIN_SIMILARITY = 0.3
+
+
+def _normalize_color_threshold(value) -> float:
+    """把任意输入归一化为 0~1 的颜色相似度下限；非法值回落到默认 0.4。"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_COLOR_MIN_SIMILARITY
+    return parsed if 0.0 <= parsed <= 1.0 else DEFAULT_COLOR_MIN_SIMILARITY
+
+
+def _normalize_color_weight(value) -> float:
+    """把任意输入归一化为 0~1 的颜色权重；非法值回落到默认 0.2。"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_COLOR_WEIGHT
+    return parsed if 0.0 <= parsed <= 1.0 else DEFAULT_COLOR_WEIGHT
+
+
+def _normalize_feature_threshold(value) -> float:
+    """把任意输入归一化为 0~1 的特征相似度下限；非法值回落到默认 0.3。"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_FEATURE_MIN_SIMILARITY
+    return parsed if 0.0 <= parsed <= 1.0 else DEFAULT_FEATURE_MIN_SIMILARITY
+
+
 def _normalize_config(data: dict) -> dict:
     schemes = data.get("schemes")
     if not isinstance(schemes, dict):
@@ -82,6 +118,10 @@ def _normalize_config(data: dict) -> dict:
         "schemes": normalized_schemes,
         # 全局：每条命令在用户指定 delay 之上再额外等待的秒数。0 表示不变。
         "extra_command_delay": _normalize_extra_delay(data.get("extra_command_delay")),
+        # 全局：图片校验参数（颜色相似度下限 / 最终分颜色权重 / 特征相似度下限）。
+        "color_min_similarity": _normalize_color_threshold(data.get("color_min_similarity")),
+        "color_weight": _normalize_color_weight(data.get("color_weight")),
+        "feature_min_similarity": _normalize_feature_threshold(data.get("feature_min_similarity")),
     }
 
 def _load_config() -> dict:
@@ -124,6 +164,24 @@ def get_extra_command_delay() -> float:
     return _normalize_extra_delay(cfg.get("extra_command_delay"))
 
 
+def get_color_min_similarity() -> float:
+    """图片校验的颜色相似度下限（0~1），供 image_service 运行时读取。"""
+    cfg = _load_config()
+    return _normalize_color_threshold(cfg.get("color_min_similarity"))
+
+
+def get_color_weight() -> float:
+    """图片校验最终分的颜色权重（0~1），供 image_service 运行时读取。"""
+    cfg = _load_config()
+    return _normalize_color_weight(cfg.get("color_weight"))
+
+
+def get_feature_min_similarity() -> float:
+    """图片校验的特征相似度下限（0~1），供 image_service 运行时读取。"""
+    cfg = _load_config()
+    return _normalize_feature_threshold(cfg.get("feature_min_similarity"))
+
+
 # ─── 全局命令延迟增量 ──────────────────────────────────────────────────────────
 
 
@@ -143,6 +201,42 @@ def update_extra_command_delay_route(req: ExtraCommandDelayUpdateRequest):
     config["extra_command_delay"] = delay
     _save_config(config)
     return {"extra_command_delay": delay}
+
+
+# ─── 图片校验颜色配置 ─────────────────────────────────────────────────────────
+
+class ColorVerifyConfigUpdateRequest(BaseModel):
+    color_min_similarity: Optional[float] = None
+    color_weight: Optional[float] = None
+    feature_min_similarity: Optional[float] = None
+
+
+@router.get("/color-verify-config")
+def get_color_verify_config_route():
+    """获取图片校验的参数（颜色下限 / 颜色权重 / 特征下限）。"""
+    return {
+        "color_min_similarity": get_color_min_similarity(),
+        "color_weight": get_color_weight(),
+        "feature_min_similarity": get_feature_min_similarity(),
+    }
+
+
+@router.put("/color-verify-config")
+def update_color_verify_config_route(req: ColorVerifyConfigUpdateRequest):
+    """更新图片校验的参数（可只更新其中一个）。"""
+    config = _load_config()
+    if req.color_min_similarity is not None:
+        config["color_min_similarity"] = _normalize_color_threshold(req.color_min_similarity)
+    if req.color_weight is not None:
+        config["color_weight"] = _normalize_color_weight(req.color_weight)
+    if req.feature_min_similarity is not None:
+        config["feature_min_similarity"] = _normalize_feature_threshold(req.feature_min_similarity)
+    _save_config(config)
+    return {
+        "color_min_similarity": _normalize_color_threshold(config.get("color_min_similarity")),
+        "color_weight": _normalize_color_weight(config.get("color_weight")),
+        "feature_min_similarity": _normalize_feature_threshold(config.get("feature_min_similarity")),
+    }
 
 
 def _require_scheme(config: dict, name: str) -> dict:
@@ -168,6 +262,7 @@ def list_schemes():
                 "is_active": name == active,
                 "valid_keys_count": len(s.get("valid_keys") or DEFAULT_VALID_KEYS),
                 "key_codes_count": len(s.get("key_codes", {})),
+                "custom_commands_count": len(s.get("custom_commands", {})),
             }
             for name, s in schemes.items()
         ],
@@ -368,6 +463,161 @@ async def reset_key_codes():
         "key_codes": dict(sorted(KEYCODE_MAP.items())),
         "custom_overrides": {},
     }
+
+
+# ─── 自定义 ADB 命令 ──────────────────────────────────────────────────────────
+
+def _normalize_custom_commands(commands: Dict[str, str]) -> Dict[str, str]:
+    """校验并归一化自定义命令映射：键名大写、命令非空且不含换行。"""
+    validated: Dict[str, str] = {}
+    for name, command in (commands or {}).items():
+        key = name.strip().upper()
+        if not key:
+            raise HTTPException(status_code=400, detail="按键名称不能为空")
+        cmd = command.strip()
+        if not cmd:
+            raise HTTPException(status_code=400, detail=f"'{key}' 的命令不能为空")
+        if "\n" in cmd or "\r" in cmd:
+            raise HTTPException(status_code=400, detail=f"'{key}' 的命令不能包含换行符")
+        validated[key] = cmd
+    return validated
+
+
+def _merge_commands_into_valid_keys(scheme: dict, command_keys: set) -> None:
+    """把自定义命令按键名并入方案合法按键，避免 Excel 校验/回放时被当作无效按键。"""
+    existing = scheme.get("valid_keys")
+    if isinstance(existing, list) and existing:
+        merged = {str(k).strip().upper() for k in existing if isinstance(k, str) and k.strip()}
+    else:
+        merged = set(DEFAULT_VALID_KEYS)
+    merged.update(command_keys)
+    scheme["valid_keys"] = sorted(merged)
+
+
+@router.get("/schemes/{scheme_name}/custom-commands")
+def get_custom_commands(scheme_name: str):
+    """获取方案的按键名 → adb 命令映射。"""
+    config = _load_config()
+    scheme = _require_scheme(config, scheme_name)
+    commands = {
+        k.upper(): v
+        for k, v in scheme.get("custom_commands", {}).items()
+        if isinstance(v, str) and v.strip()
+    }
+    return {"custom_commands": dict(sorted(commands.items()))}
+
+
+@router.put("/schemes/{scheme_name}/custom-commands")
+def update_custom_commands(scheme_name: str, req: CustomCommandsUpdateRequest):
+    """整体替换方案的按键名 → adb 命令映射，并把键名并入合法按键。"""
+    validated = _normalize_custom_commands(req.custom_commands)
+    config = _load_config()
+    scheme = _require_scheme(config, scheme_name)
+    scheme["custom_commands"] = validated
+    _merge_commands_into_valid_keys(scheme, set(validated.keys()))
+    _save_config(config)
+    return {"custom_commands": dict(sorted(validated.items()))}
+
+
+@router.delete("/schemes/{scheme_name}/custom-commands/{key_name}")
+def delete_custom_command(scheme_name: str, key_name: str):
+    """删除单条自定义命令。"""
+    config = _load_config()
+    scheme = _require_scheme(config, scheme_name)
+    key = key_name.strip().upper()
+    commands = scheme.get("custom_commands", {})
+    if key not in commands:
+        raise HTTPException(status_code=404, detail=f"'{key}' 不是自定义命令")
+    del commands[key]
+    scheme["custom_commands"] = commands
+    _save_config(config)
+    return {"custom_commands": dict(sorted(commands.items()))}
+
+
+@router.post("/schemes/{scheme_name}/custom-commands/reset")
+def reset_custom_commands(scheme_name: str):
+    """清空方案的自定义命令。"""
+    config = _load_config()
+    scheme = _require_scheme(config, scheme_name)
+    scheme.pop("custom_commands", None)
+    _save_config(config)
+    return {"custom_commands": {}}
+
+
+# ─── sendevent 长按配置 ───────────────────────────────────────────────────────
+
+LONG_PRESS_METHODS = ("auto", "sendevent", "input")
+
+
+def _normalize_long_press_method(value) -> str:
+    method = str(value or "auto").strip().lower()
+    return method if method in LONG_PRESS_METHODS else "auto"
+
+
+class SendeventConfigUpdateRequest(BaseModel):
+    sendevent_device: Optional[str] = None
+    sendevent_keycode_overrides: Optional[Dict[str, int]] = None
+    long_press_method: Optional[str] = None
+
+
+@router.get("/schemes/{scheme_name}/sendevent-config")
+def get_sendevent_config(scheme_name: str):
+    """获取方案的 sendevent 长按配置。"""
+    config = _load_config()
+    scheme = _require_scheme(config, scheme_name)
+    return {
+        "sendevent_device": scheme.get("sendevent_device", ""),
+        "sendevent_keycode_overrides": scheme.get("sendevent_keycode_overrides", {}),
+        "long_press_method": _normalize_long_press_method(scheme.get("long_press_method")),
+    }
+
+
+@router.put("/schemes/{scheme_name}/sendevent-config")
+def update_sendevent_config(scheme_name: str, req: SendeventConfigUpdateRequest):
+    """更新方案的 sendevent 长按配置。"""
+    config = _load_config()
+    scheme = _require_scheme(config, scheme_name)
+
+    if req.sendevent_device is not None:
+        device = req.sendevent_device.strip()
+        if device:
+            scheme["sendevent_device"] = device
+        else:
+            scheme.pop("sendevent_device", None)
+
+    if req.sendevent_keycode_overrides is not None:
+        validated: Dict[str, int] = {}
+        for k, v in req.sendevent_keycode_overrides.items():
+            if not isinstance(v, int) or v < 0:
+                raise HTTPException(status_code=400, detail=f"Linux keycode 必须为非负整数，收到: {v}")
+            validated[str(k)] = v
+        scheme["sendevent_keycode_overrides"] = validated
+
+    if req.long_press_method is not None:
+        method = _normalize_long_press_method(req.long_press_method)
+        if method != "auto":
+            scheme["long_press_method"] = method
+        else:
+            scheme.pop("long_press_method", None)
+
+    _save_config(config)
+    return {
+        "sendevent_device": scheme.get("sendevent_device", ""),
+        "sendevent_keycode_overrides": scheme.get("sendevent_keycode_overrides", {}),
+        "long_press_method": _normalize_long_press_method(scheme.get("long_press_method")),
+    }
+
+
+@router.post("/schemes/{scheme_name}/sendevent-config/reset")
+def reset_sendevent_config(scheme_name: str):
+    """重置方案的 sendevent 配置为默认值。"""
+    config = _load_config()
+    _require_scheme(config, scheme_name)
+    config["schemes"][scheme_name].pop("sendevent_device", None)
+    config["schemes"][scheme_name].pop("sendevent_keycode_overrides", None)
+    config["schemes"][scheme_name].pop("long_press_method", None)
+    _save_config(config)
+    return {"sendevent_device": "", "sendevent_keycode_overrides": {}, "long_press_method": "auto"}
 
 
 # ─── Excel 导入：从 RC 表 RC_FUN/KeyCode 列生成新方案 ───────────────────────────

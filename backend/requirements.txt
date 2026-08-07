@@ -8,3 +8,5 @@ opencv-python-headless
 python-multipart
 pygrabber; sys_platform == "win32"
 imageio[ffmpeg]
+noisereduce
+scipy

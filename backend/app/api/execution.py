@@ -6,18 +6,19 @@ import logging
 import math
 import re
 import time
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ..runtime import get_controller, get_current_device
-from ..utils.adb_controller import KEYCODE_MAP, NON_EXECUTABLE_KEYS, apply_min_command_delay, get_keycode_map
+from ..utils.adb_controller import KEYCODE_MAP, NON_EXECUTABLE_KEYS, apply_min_command_delay, get_custom_commands, get_keycode_map, _parse_key_and_hold, _parse_repeat_count
 from ..utils.path_resolver import resolve_excel_file, resolve_image_file
-from ..services.image_compare_service import (
-    ImageCompareRuntimeError,
-    image_compare_service,
+from ..services.image_service import (
+    format_score_breakdown,
     verify_image_base64_match,
     verify_image_match,
 )
+from ..services.asr_service import asr_service, AsrRuntimeError
 from ..services.excel_service import excel_service
 from ..services.capture_card_service import capture_card_service
 from ..config import settings
@@ -32,14 +33,6 @@ class ExecutionStopped(Exception):
     """Raised when the client stops listening to the execution stream."""
 
 
-class ImageModelSelectRequest(BaseModel):
-    model_name: str
-
-
-class ImageModelDownloadRequest(BaseModel):
-    model_name: str = image_compare_service.DEFAULT_MODEL_NAME
-    repo_id: str = image_compare_service.DEFAULT_REPO_ID
-
 def format_sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -49,8 +42,9 @@ def format_sse_comment(comment: str = "keepalive") -> str:
 
 
 def get_valid_row(valid_rows: list, row_index: int) -> dict:
-    if 1 <= row_index <= len(valid_rows):
-        return valid_rows[row_index - 1]
+    for row in valid_rows:
+        if row.get("row") == row_index:
+            return row
     return {}
 
 
@@ -71,6 +65,18 @@ def build_compare_details(result: dict) -> dict:
             continue
         details[key] = value
     return details
+
+
+def resolve_verify_verdict(matched: bool, expect_no_match: bool) -> bool:
+    """根据图片是否匹配与反向断言开关，计算本次校验是否通过。
+
+    - ``expect_no_match=False``（默认，ASSERT）：匹配即 PASS。
+    - ``expect_no_match=True``（NOTASSERT）：不匹配即 PASS。
+
+    Returns:
+        本次校验是否通过（True 记 PASS，False 记 FAIL）。
+    """
+    return (not matched) if expect_no_match else matched
 
 
 async def ensure_execution_active(request: Request | None) -> None:
@@ -116,6 +122,7 @@ async def stream_wait_with_heartbeat(
 async def stream_row_command_events(valid_rows: list, row_index: int, request: Request | None = None):
     """复用 Excel 解析结果，逐条输出命令执行事件。"""
     controller = get_controller()
+    custom_commands = get_custom_commands()
     row_data = get_valid_row(valid_rows, row_index)
     commands = row_data.get("commands", [])
     logger.info("[执行] 共 %d 条命令待执行", len(commands))
@@ -133,20 +140,25 @@ async def stream_row_command_events(valid_rows: list, row_index: int, request: R
             yield {'status': 'error', 'message': f'命令格式错误: {cmd}'}
             continue
 
-        keyname, repeat, delay = parts
-        keyname = keyname.upper()
+        keyname, hold_us = _parse_key_and_hold(parts[0])
 
-        if keyname not in get_keycode_map():
+        if keyname not in get_keycode_map() and keyname not in custom_commands:
             logger.warning("[执行] 未知按键: %s", keyname)
             yield {'status': 'error', 'message': f'未知按键: {keyname}'}
             continue
 
         try:
-            repeat = int(repeat)
-            delay = apply_min_command_delay(float(delay))
+            repeat = _parse_repeat_count(parts[1], parts[2])
+            delay = apply_min_command_delay(float(parts[2]))
         except ValueError:
             logger.warning("[执行] 命令参数错误: %s", cmd)
             yield {'status': 'error', 'message': f'命令参数错误: {cmd}'}
+            continue
+
+        if repeat == 0:
+            # 随机次数为 0：该指令本次不执行（不发送按键、不触发校验、不等待延迟）
+            logger.info("[执行] 跳过指令: %s（随机次数为 0）", keyname)
+            yield {'status': 'info', 'message': f'已跳过 {keyname}（随机次数为 0）'}
             continue
 
         if keyname in NON_EXECUTABLE_KEYS:
@@ -155,7 +167,21 @@ async def stream_row_command_events(valid_rows: list, row_index: int, request: R
                 # 这里 yield 一个内部占位事件，每发一次代表执行一次校验。
                 # repeat>1 时按重复次数发多次（少见，但保留语义）；delay 在每次校验后等待。
                 for _ in range(repeat):
-                    yield {'__assert_check__': True}
+                    yield {'__assert_check__': True, 'expect_no_match': False}
+                    if delay > 0:
+                        async for keepalive in stream_wait_with_heartbeat(delay, request):
+                            yield keepalive
+            elif keyname == 'NOTASSERT':
+                # NOTASSERT 触发反向断言：截图 + 图片校验，要求"不匹配"目标图标才算 PASS。
+                for _ in range(repeat):
+                    yield {'__assert_check__': True, 'expect_no_match': True}
+                    if delay > 0:
+                        async for keepalive in stream_wait_with_heartbeat(delay, request):
+                            yield keepalive
+            elif keyname == 'TTS':
+                # TTS 触发"录音 + ASR 校验"流程，由上层 execute_commands_stream 接管。
+                for _ in range(repeat):
+                    yield {'__tts_check__': True, 'delay': delay}
                     if delay > 0:
                         async for keepalive in stream_wait_with_heartbeat(delay, request):
                             yield keepalive
@@ -174,9 +200,44 @@ async def stream_row_command_events(valid_rows: list, row_index: int, request: R
                             yield keepalive
             continue
 
+        if keyname in custom_commands:
+            # 自定义 adb 命令按键：执行配置的命令（无 keyevent，忽略 hold_us）
+            command = custom_commands[keyname]
+            logger.info("[执行] 自定义命令解析: keyname=%s, repeat=%d, delay=%.2fs, cmd=%s",
+                        keyname, repeat, delay, command)
+            for i in range(repeat):
+                await ensure_execution_active(request)
+                repeat_label = f' ({i + 1}/{repeat})' if repeat > 1 else ''
+                if first_command:
+                    first_command = False
+                    await wait_with_cancellation(0.3, request)
+                else:
+                    await wait_with_cancellation(0.01, request)
+
+                send_started = time.perf_counter()
+                ok = await asyncio.to_thread(controller.run_custom_command, keyname, command, 0)
+                elapsed_ms = (time.perf_counter() - send_started) * 1000
+                if ok:
+                    yield {'status': 'success', 'message': f'✓ {keyname}{repeat_label} 自定义命令执行成功 (耗时{elapsed_ms:.0f}ms)'}
+                else:
+                    yield {'status': 'error', 'message': f'✗ {keyname}{repeat_label} 自定义命令执行失败'}
+
+                # 从命令发送起算，等待 delay 秒再执行下一次
+                remaining_delay = max(0.0, delay - (time.perf_counter() - send_started))
+                if remaining_delay > 0:
+                    if remaining_delay >= WAIT_KEEPALIVE_INTERVAL:
+                        yield {
+                            'status': 'info',
+                            'message': f'已执行 {keyname}，等待约 {math.ceil(remaining_delay)} 秒后执行下一条命令'
+                        }
+                    async for keepalive in stream_wait_with_heartbeat(remaining_delay, request):
+                        yield keepalive
+            continue
+
         keycode = get_keycode_map()[keyname]
-        logger.info("[执行] 命令解析: keyname=%s, keycode=%d, repeat=%d, delay=%.2fs",
-                    keyname, keycode, repeat, delay)
+        is_long_press = hold_us is not None
+        logger.info("[执行] 命令解析: keyname=%s, keycode=%d, repeat=%d, delay=%.2fs, long_press=%s",
+                    keyname, keycode, repeat, delay, f"{hold_us}us" if is_long_press else "否")
 
         for i in range(repeat):
             await ensure_execution_active(request)
@@ -188,11 +249,16 @@ async def stream_row_command_events(valid_rows: list, row_index: int, request: R
                 await wait_with_cancellation(0.01, request)
 
             # 记录按键发送前的时间，用于精确计算剩余延迟
+            # 发键是阻塞 ADB 调用，放进线程池执行，避免设备无响应时冻结事件循环。
             send_started = time.perf_counter()
-            ok = controller.send_keyevent(keycode, keyname, 0)
+            if is_long_press:
+                ok = await asyncio.to_thread(controller.send_long_press, keycode, keyname, hold_us, 0)
+            else:
+                ok = await asyncio.to_thread(controller.send_keyevent, keycode, keyname, 0)
             elapsed_ms = (time.perf_counter() - send_started) * 1000
             if ok:
-                yield {'status': 'success', 'message': f'✓ {keyname}{repeat_label} 发送成功 (耗时{elapsed_ms:.0f}ms)'}
+                label = f'长按{hold_us}us' if is_long_press else '发送'
+                yield {'status': 'success', 'message': f'✓ {keyname}{repeat_label} {label}成功 (耗时{elapsed_ms:.0f}ms)'}
             else:
                 yield {'status': 'error', 'message': f'✗ {keyname}{repeat_label} 发送失败'}
 
@@ -245,9 +311,9 @@ async def execute_commands_stream(
         settings.RECORDING_DIR.mkdir(parents=True, exist_ok=True)
         recording_path = str(settings.RECORDING_DIR / recording_filename)
         if screenshot_source == "capture_card":
-            recording_started = capture_card_service.start_recording(recording_path)
+            recording_started = await asyncio.to_thread(capture_card_service.start_recording, recording_path)
         else:
-            recording_started = controller.start_recording(recording_path)
+            recording_started = await asyncio.to_thread(controller.start_recording, recording_path)
         if recording_started:
             logger.info("[执行] 录屏已启动: %s", recording_filename)
         else:
@@ -324,7 +390,7 @@ async def execute_commands_stream(
                 return None, None
         else:
             logger.info("[执行] 正在截图: title=%s", title_for_screenshot)
-            screenshot_path = controller.take_screenshot(title_for_screenshot)
+            screenshot_path = await asyncio.to_thread(controller.take_screenshot, title_for_screenshot)
             if not screenshot_path:
                 logger.error("[执行] 截图失败: title=%s", title_for_screenshot)
                 return None, None
@@ -333,7 +399,7 @@ async def execute_commands_stream(
             return screenshot_path, screenshot_url
 
     def _do_verify(screenshot_path: str, target_image_name: str, base64_data: str) -> dict:
-        """对一张图做比对，返回 verify_result（image_compare_service 风格的 dict）。"""
+        """对一张图做比对，返回 verify_result（image_service 风格的 dict）。"""
         if base64_data:
             logger.info("[校验] 使用 base64 数据比对: screenshot=%s, threshold=%.2f", screenshot_path, match_threshold)
             result = verify_image_base64_match(screenshot_path, base64_data, threshold=match_threshold)
@@ -356,8 +422,146 @@ async def execute_commands_stream(
     assert_results: list[dict] = []
     last_screenshot_url = ''
 
-    async def _run_one_assert_check(assert_index: int):
-        """执行一次"截图 + 比对"校验流程，结果累积进 assert_results 并 yield SSE 事件。"""
+    # ── TTS 校验状态 ──
+    tts_results: list[dict] = []
+    _tts_pending = False  # 遇到 TTS 标记后置 True，下一条命令作为 trigger
+    _tts_awaiting_next = False  # trigger 已执行完，等待下一条指令结束再取 TTS 文本
+    _tts_asr_available = True
+    try:
+        _tts_active_model = asr_service.get_active_model()
+        if _tts_active_model is None:
+            _tts_asr_available = False
+    except Exception:
+        _tts_asr_available = False
+
+    async def _run_one_tts_check(tts_index: int, trigger_command: str):
+        """执行一次"录音 + TTS 捕获 + ASR 识别 + 比对"校验流程。
+
+        注意：trigger 命令已由调用方执行过，此处不再重复发送。
+        """
+        case_title = row_data.get("title") or f"第 {row_index} 行"
+        controller = get_controller()
+        recorder = None
+        recording_started = False
+
+        try:
+            # 开始录音
+            audio_config = asr_service.get_audio_config()
+            audio_device_index = audio_config.get("audio_device_index")
+            recorder = asr_service.create_recorder(device=audio_device_index)
+            recorder.start_recording()
+            recording_started = True
+            logger.info("[TTS] 录音已启动 (段 %d), trigger=%s", tts_index + 1, trigger_command)
+
+            # trigger 命令已执行，直接等待 TTS 输出
+            tts_log_path = str(
+                asr_service.log_root
+                / f"tts_{asr_service._sanitize_case_name(case_title)}_k{tts_index}_{datetime.now():%Y%m%d_%H%M%S}.log"
+            )
+            tts_text = ""
+            for _ in range(6):
+                await wait_with_cancellation(0.5, request)
+                tts_text = (await asyncio.to_thread(controller.get_last_tts_text, log_path=tts_log_path) or "").strip()
+                if tts_text:
+                    break
+
+            # 停止录音
+            recorder.stop_recording()
+            recording_started = False
+
+            audio_path = asr_service.save_audio_recording(recorder, f"{case_title}_k{tts_index}")
+            asr_service.enhance_audio(audio_path)
+            asr_service.reduce_noise(audio_path)
+            asr_service.adjust_speed(audio_path, speed=0.9)
+            transcript = asr_service.transcribe_audio(audio_path)
+            transcript_path = asr_service.save_transcript(audio_path, transcript)
+
+            # 比对
+            reference = asr_service.find_reference(case_title)
+            reference_text = (reference or {}).get("text", "").strip() if reference else ""
+            comparison_text = reference_text or tts_text
+            comparison_source = "reference" if reference_text else "tts"
+
+            if not comparison_text:
+                record = {
+                    'tts_index': tts_index,
+                    'trigger_command': trigger_command,
+                    'verify_result': 'NO_REF',
+                    'score': None,
+                    'tts_text': tts_text,
+                    'transcribed_text': transcript,
+                    'audio_path': str(audio_path),
+                }
+                tts_results.append(record)
+                yield format_sse({
+                    'status': 'error',
+                    'message': f'TTS #{tts_index + 1}: 无参考文本且未捕获 TTS',
+                    **record,
+                })
+                return
+
+            threshold = 0.85 if comparison_source == "tts" else 0.9
+            comparison = asr_service.compare_transcript(transcript, comparison_text, threshold=threshold)
+            asr_service.save_compare_report(audio_path, transcript, comparison_text, comparison)
+
+            matched = comparison["matched"]
+            record = {
+                'tts_index': tts_index,
+                'trigger_command': trigger_command,
+                'verify_result': comparison["result"],
+                'score': comparison["average"],
+                'cosine': comparison["cosine"],
+                'sequence': comparison["sequence"],
+                'tts_text': tts_text,
+                'transcribed_text': transcript,
+                'reference_text': comparison_text,
+                'comparison_source': comparison_source,
+                'audio_path': str(audio_path),
+                'transcript_path': str(transcript_path),
+            }
+            tts_results.append(record)
+
+            msg = (
+                f'TTS #{tts_index + 1}: {comparison["result"]} '
+                f'平均 {comparison["average"] * 100:.2f}% / '
+                f'余弦 {comparison["cosine"] * 100:.2f}% / 序列 {comparison["sequence"] * 100:.2f}%'
+            )
+            logger.info("[TTS] %s", msg)
+            yield format_sse({
+                'status': 'success' if matched else 'error',
+                'message': msg,
+                **record,
+            })
+
+        except Exception as exc:
+            logger.error("[TTS] 校验异常 (段 %d): %s", tts_index + 1, exc, exc_info=True)
+            if recorder is not None and recording_started:
+                try:
+                    recorder.stop_recording()
+                except Exception:
+                    pass
+            record = {
+                'tts_index': tts_index,
+                'trigger_command': trigger_command,
+                'verify_result': 'ERROR',
+                'score': None,
+                'error': str(exc),
+            }
+            tts_results.append(record)
+            yield format_sse({
+                'status': 'error',
+                'message': f'TTS #{tts_index + 1}: 校验异常 - {exc}',
+                **record,
+            })
+
+    async def _run_one_assert_check(assert_index: int, expect_no_match: bool = False):
+        """执行一次"截图 + 比对"校验流程，结果累积进 assert_results 并 yield SSE 事件。
+
+        Args:
+            assert_index: 第几次校验（0 基）。
+            expect_no_match: 反向断言开关。True（NOTASSERT）时要求截图"不匹配"
+                目标图标才算 PASS；False（ASSERT）时匹配即 PASS。
+        """
         nonlocal last_screenshot_url
         target_image = verify_image_list[assert_index] if assert_index < len(verify_image_list) else ''
         logger.info("[执行] ── 第 %d 次校验开始 (target=%s) ──", assert_index + 1, target_image or '无')
@@ -458,34 +662,55 @@ async def execute_commands_stream(
 
         matched = bool(verify_result.get('matched'))
         score = verify_result.get('score', 0.0)
-        if matched:
-            logger.info("[执行] 第 %d 次校验通过 ✓ score=%.4f, target=%s", assert_index + 1, score, target_image)
+        passed = resolve_verify_verdict(matched, expect_no_match)
+        reverse_label = '（反向断言）' if expect_no_match else ''
+        breakdown = format_score_breakdown(verify_result)
+        if passed:
+            logger.info("[执行] 第 %d 次校验通过%s ✓ score=%.4f, target=%s | %s",
+                        assert_index + 1, reverse_label, score, target_image, breakdown)
         else:
-            logger.warning("[执行] 第 %d 次校验失败 ✗ score=%.4f, target=%s", assert_index + 1, score, target_image)
+            logger.warning("[执行] 第 %d 次校验失败%s ✗ score=%.4f, target=%s | %s",
+                           assert_index + 1, reverse_label, score, target_image, breakdown)
+        if passed:
+            message = '验证成功: 图标不匹配' if expect_no_match else '验证成功: 图标匹配'
+        else:
+            message = '验证失败: 图标仍匹配' if expect_no_match else '验证失败: 图标不匹配'
         record = {
             'assert_index': assert_index,
             'verify_image': target_image,
             'screenshot_url': screenshot_url,
-            'verify_result': 'PASS' if matched else 'FAIL',
+            'verify_result': 'PASS' if passed else 'FAIL',
+            'expect_no_match': expect_no_match,
             'score': score,
-            'message': '验证成功: 图标匹配' if matched else '验证失败: 图标不匹配',
+            'message': message,
             'compare_engine': verify_result.get('engine', 'opencv'),
             'model_name': verify_result.get('model_name', ''),
             'compare_details': compare_details,
         }
         assert_results.append(record)
         yield format_sse({
-            'status': 'success' if matched else 'error',
+            'status': 'success' if passed else 'error',
             **record,
         })
 
     try:
         async for event in stream_row_command_events(valid_rows, row_index, request):
-            # ASSERT 触发的截图 + 校验占位事件
+            # ASSERT / NOTASSERT 触发的截图 + 校验占位事件
             if isinstance(event, dict) and event.get('__assert_check__'):
                 if enable_verification:
-                    async for emitted in _run_one_assert_check(len(assert_results)):
+                    expect_no_match = bool(event.get('expect_no_match', False))
+                    async for emitted in _run_one_assert_check(len(assert_results), expect_no_match=expect_no_match):
                         yield emitted
+                continue
+
+            # TTS 标记：清空 logcat，下一条命令作为 trigger
+            if isinstance(event, dict) and event.get('__tts_check__'):
+                if _tts_asr_available:
+                    get_controller().clear_logcat()
+                    _tts_pending = True
+                    _tts_awaiting_next = False
+                else:
+                    yield format_sse({'status': 'error', 'message': 'TTS 校验不可用: ASR 模型未加载'})
                 continue
 
             # 普通命令事件
@@ -494,6 +719,29 @@ async def execute_commands_stream(
             else:
                 yield format_sse(event)
 
+            # TTS trigger 命令执行完毕，不立即取 TTS 文本，等下一条指令结束再取
+            if _tts_pending and not _tts_awaiting_next and isinstance(event, dict) and event.get('status') in ('success', 'error'):
+                _tts_pending = False
+                _tts_awaiting_next = True
+                # 从 "✓ OK (1/1) 发送成功" 或 "✗ OK 发送失败" 中提取按键名
+                msg = event.get('message') or ''
+                m = re.match(r'^[✓✗]\s*(\S+)', msg)
+                trigger_cmd = m.group(1) if m else msg.split(' ')[0]
+                # 不立即执行 TTS check，等下一条指令结束后再执行
+                continue
+
+            # 下一条指令执行完毕，此时取 TTS 文本并运行 ASR 校验
+            if _tts_awaiting_next and isinstance(event, dict) and event.get('status') in ('success', 'error'):
+                _tts_awaiting_next = False
+                async for emitted in _run_one_tts_check(len(tts_results), trigger_cmd):
+                    yield emitted
+
+        # 如果 trigger 是最后一条指令，没有下一条来触发 TTS check，这里补执行
+        if _tts_awaiting_next:
+            _tts_awaiting_next = False
+            async for emitted in _run_one_tts_check(len(tts_results), trigger_cmd):
+                yield emitted
+
         # 所有指令跑完后，如果 verify_image_list 还有未消费的图（用户在 checkPic 列里多
         # 留了一张作为"末尾隐含 Assert"），自动再触发一次校验。
         if enable_verification:
@@ -501,24 +749,36 @@ async def execute_commands_stream(
                 async for emitted in _run_one_assert_check(len(assert_results)):
                     yield emitted
 
-        # 做汇总
-        if assert_results:
-            statuses = [r['verify_result'] for r in assert_results]
-            if any(s == 'ERROR' for s in statuses):
+        # 做汇总（合并 assert + tts 结果）
+        all_statuses = (
+            [r['verify_result'] for r in assert_results]
+            + [r['verify_result'] for r in tts_results]
+        )
+        if all_statuses:
+            if any(s == 'ERROR' for s in all_statuses):
                 overall = 'ERROR'
-            elif all(s == 'PASS' for s in statuses):
+            elif all(s == 'PASS' for s in all_statuses):
                 overall = 'PASS'
             else:
                 overall = 'FAIL'
 
             _write_test_result(overall)
-            overall_message = (
-                f'最终结果：{overall}（{statuses.count("PASS")}/{len(statuses)} 通过）'
-            )
+            parts = []
+            if assert_results:
+                parts.append(f"截图 {sum(1 for r in assert_results if r['verify_result'] == 'PASS')}/{len(assert_results)} 通过")
+            if tts_results:
+                parts.append(f"TTS {sum(1 for r in tts_results if r['verify_result'] == 'PASS')}/{len(tts_results)} 通过")
+            overall_message = f'最终结果：{overall}（{"；".join(parts)}）'
+
             logger.info("[执行] %s", overall_message)
-            logger.info("[执行] 各项详情: %s", [
-                f"#{r['assert_index']+1}:{r['verify_result']}({r['score']:.2f})" for r in assert_results
-            ])
+            if assert_results:
+                logger.info("[执行] 截图详情: %s", [
+                    f"#{r['assert_index']+1}:{r['verify_result']}({r['score']:.2f})" for r in assert_results
+                ])
+            if tts_results:
+                logger.info("[执行] TTS 详情: %s", [
+                    f"#{r['tts_index']+1}:{r['verify_result']}({r.get('score', 0):.2f})" for r in tts_results
+                ])
             logger.info("[执行] ════════════════════════════════════════")
 
             # 停止录屏
@@ -526,9 +786,9 @@ async def execute_commands_stream(
             if recording_started:
                 await asyncio.sleep(2)  # 多录 2 秒，确保最后操作完整
                 if screenshot_source == "capture_card":
-                    video_path = capture_card_service.stop_recording_and_convert()
+                    video_path = await asyncio.to_thread(capture_card_service.stop_recording_and_convert)
                 else:
-                    video_path = controller.stop_recording()
+                    video_path = await asyncio.to_thread(controller.stop_recording)
                 if video_path:
                     video_url = f"/api/recording/{os.path.basename(video_path)}"
                     logger.info("[执行] 录屏已保存: %s（后台正在转换为 H.264，约需 1-2 分钟）", video_url)
@@ -538,6 +798,7 @@ async def execute_commands_stream(
                 'message': overall_message,
                 'verify_result': overall,
                 'multi_verify_results': assert_results,
+                'multi_tts_results': tts_results,
                 'screenshot_url': last_screenshot_url,
                 'video_url': video_url,
                 'video_converting': screenshot_source == "capture_card",
@@ -554,18 +815,53 @@ async def execute_commands_stream(
             if recording_started:
                 await asyncio.sleep(2)
                 if screenshot_source == "capture_card":
-                    video_path = capture_card_service.stop_recording_and_convert()
+                    video_path = await asyncio.to_thread(capture_card_service.stop_recording_and_convert)
                 else:
-                    video_path = controller.stop_recording()
+                    video_path = await asyncio.to_thread(controller.stop_recording)
                 if video_path:
                     video_url = f"/api/recording/{os.path.basename(video_path)}"
                     logger.info("[执行] 录屏已保存: %s", video_url)
 
-            yield format_sse({
+            result_event = {
                 'status': 'success',
                 'message': '执行完成（校验已跳过）',
                 'verify_result': 'NT',
                 'video_url': video_url,
+            }
+            if tts_results:
+                tts_statuses = [r['verify_result'] for r in tts_results]
+                tts_overall = 'PASS' if all(s == 'PASS' for s in tts_statuses) else 'FAIL'
+                result_event['multi_tts_results'] = tts_results
+                result_event['tts_verify_result'] = tts_overall
+                result_event['message'] = f'执行完成（截图校验已跳过，TTS: {tts_overall}）'
+            yield format_sse(result_event)
+            return
+
+        elif tts_results:
+            # 有 TTS 校验但无截图校验：输出 TTS 汇总
+            tts_statuses = [r['verify_result'] for r in tts_results]
+            tts_overall = 'PASS' if all(s == 'PASS' for s in tts_statuses) else 'FAIL'
+            _write_test_result(tts_overall)
+            overall_message = f'最终结果：{tts_overall}（TTS {tts_statuses.count("PASS")}/{len(tts_statuses)} 通过）'
+            logger.info("[执行] %s", overall_message)
+
+            video_url = ""
+            if recording_started:
+                await asyncio.sleep(2)
+                if screenshot_source == "capture_card":
+                    video_path = await asyncio.to_thread(capture_card_service.stop_recording_and_convert)
+                else:
+                    video_path = await asyncio.to_thread(controller.stop_recording)
+                if video_path:
+                    video_url = f"/api/recording/{os.path.basename(video_path)}"
+
+            yield format_sse({
+                'status': 'success' if tts_overall == 'PASS' else 'error',
+                'message': overall_message,
+                'verify_result': tts_overall,
+                'multi_tts_results': tts_results,
+                'video_url': video_url,
+                'video_converting': screenshot_source == "capture_card",
             })
             return
 
@@ -585,7 +881,7 @@ async def execute_commands_stream(
                     logger.error("[执行] 采集卡截图异常: %s", e)
                     screenshot_path = None
             else:
-                screenshot_path = controller.take_screenshot(test_title)
+                screenshot_path = await asyncio.to_thread(controller.take_screenshot, test_title)
             if screenshot_path:
                 screenshot_url = f"/api/screenshot/{os.path.basename(screenshot_path)}"
                 yield format_sse({'status': 'success', 'message': '截图成功', 'screenshot_url': screenshot_url})
@@ -626,11 +922,13 @@ async def execute_commands_stream(
                             }
                             if verify_result['matched']:
                                 _write_test_result('PASS')
-                            logger.info("[执行] 末尾校验通过 ✓ score=%.4f", verify_result['score'])
+                            logger.info("[执行] 末尾校验通过 ✓ score=%.4f | %s",
+                                        verify_result['score'], format_score_breakdown(verify_result))
                             yield format_sse({'status': 'success', 'message': '验证成功: 图标匹配', 'verify_result': 'PASS', 'score': verify_result['score'], **result_meta})
                         else:
                             _write_test_result('FAIL')
-                            logger.warning("[执行] 末尾校验失败 ✗ score=%.4f", verify_result['score'])
+                            logger.warning("[执行] 末尾校验失败 ✗ score=%.4f | %s",
+                                           verify_result['score'], format_score_breakdown(verify_result))
                             yield format_sse({'status': 'error', 'message': '验证失败: 图标不匹配', 'verify_result': 'FAIL', 'score': verify_result['score'], **result_meta})
                     else:
                         _write_test_result('ERROR')
@@ -663,65 +961,12 @@ async def execute_commands_stream(
         # 停止录屏（异常退出也要清理）
         if recording_started:
             if screenshot_source == "capture_card":
-                capture_card_service.stop_recording()
+                await asyncio.to_thread(capture_card_service.stop_recording)
             else:
-                controller.stop_recording()
+                await asyncio.to_thread(controller.stop_recording)
         logger.info("[执行] 客户端断开连接，执行中止: file=%s, row=%d", file_name, row_index)
         return
 
-
-@router.get("/image-models/status")
-async def get_image_model_status():
-    """返回图片比对模型状态；未选择模型时默认使用 OpenCV。"""
-    return image_compare_service.get_status()
-
-
-@router.post("/image-models/download")
-async def download_image_model(request: ImageModelDownloadRequest):
-    """下载 DINOv2 图片比对模型到运行时目录。"""
-    try:
-        return image_compare_service.download_model(request.model_name, request.repo_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ImageCompareRuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"下载图片模型失败: {str(e)}")
-
-
-@router.post("/image-models/select")
-async def select_image_model(request: ImageModelSelectRequest):
-    """切换当前图片比对模型。"""
-    try:
-        return image_compare_service.set_active_model(request.model_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"切换图片模型失败: {str(e)}")
-
-
-@router.post("/image-models/clear-selection")
-async def clear_selected_image_model():
-    """取消当前图片模型选择，回退为 OpenCV。"""
-    try:
-        return image_compare_service.clear_active_model()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"切换 OpenCV 失败: {str(e)}")
-
-
-@router.delete("/image-models")
-async def delete_image_model(model_name: str):
-    """删除运行时图片模型目录。"""
-    try:
-        return image_compare_service.delete_model(model_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除图片模型失败: {str(e)}")
 
 @router.post("/execute")
 async def execute_excel_commands(request: Request):

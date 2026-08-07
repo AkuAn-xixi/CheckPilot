@@ -39,7 +39,7 @@ class AsrRuntimeError(RuntimeError):
 #: 模型目录里写入的元信息文件名，记录该目录归属哪一种后端、关联仓库等。
 BACKEND_META_FILENAME = "backend_meta.json"
 
-#: 三种后端类型常量
+#: 两种后端类型常量
 BACKEND_KIND_QWEN = "qwen"
 BACKEND_KIND_COHERE = "cohere"
 BACKEND_KIND_UNKNOWN = "unknown"
@@ -48,6 +48,7 @@ BACKEND_KIND_UNKNOWN = "unknown"
 COHERE_DEFAULT_MODEL_NAME = "Cohere-Transcribe-03-2026"
 COHERE_DEFAULT_REPO_ID = "CohereLabs/cohere-transcribe-03-2026"
 COHERE_TARGET_SAMPLE_RATE = 16000
+
 COHERE_LANGUAGE_ALIASES = {
     "english": "en", "en": "en", "en-us": "en",
     "german": "de", "de": "de",
@@ -65,9 +66,14 @@ COHERE_LANGUAGE_ALIASES = {
     "korean": "ko", "ko": "ko",
 }
 
-#: 通过 HuggingFace 镜像下载时的端点候选，国内优先。
+#: 通过 HuggingFace 镜像下载时的端点候选，仅使用国内镜像。
 DEFAULT_HF_DOWNLOAD_ENDPOINT = "https://hf-mirror.com"
-MIRROR_HF_DOWNLOAD_ENDPOINTS = ("https://huggingface.co",)
+# 国内备选镜像源列表（按优先级排序）
+HF_MIRROR_ENDPOINTS = [
+    "https://hf-mirror.com",
+    "https://huggingface.sukaka.top",
+    "https://hf.xxxx.one",
+]
 
 
 def detect_backend_kind(model_dir: Path) -> str:
@@ -220,10 +226,14 @@ class _CohereTranscribeBackend(_AsrBackend):
     @staticmethod
     def _read_audio_waveform(audio_path: str | Path) -> "np.ndarray":
         try:
-            import soundfile as sf
             import scipy.signal
+            from scipy.io import wavfile
 
-            waveform, sr = sf.read(str(audio_path), dtype="float32")
+            # 用 scipy 读取 WAV（避免 libsndfile 对 wave 模块写出的文件兼容性问题导致 C 级崩溃）
+            sr, raw_data = wavfile.read(str(audio_path))
+            waveform = raw_data.astype(np.float32)
+            if np.issubdtype(raw_data.dtype, np.integer):
+                waveform = waveform / np.iinfo(raw_data.dtype).max
             # 立体声转单声道
             if waveform.ndim > 1:
                 waveform = waveform.mean(axis=1)
@@ -239,7 +249,7 @@ class _CohereTranscribeBackend(_AsrBackend):
                 import librosa
                 return librosa.load(str(audio_path), sr=COHERE_TARGET_SAMPLE_RATE, mono=True)[0]
             except ImportError as exc:
-                raise AsrRuntimeError("未安装 soundfile/scipy 或 librosa，无法读取音频") from exc
+                raise AsrRuntimeError("未安装 scipy 或 librosa，无法读取音频") from exc
         except Exception as exc:
             raise AsrRuntimeError(f"读取录音文件失败: {str(exc)}") from exc
 
@@ -379,7 +389,12 @@ class Recorder:
         def callback(indata, frames, time_info, status):
             if status:
                 _log.warning("[录音] stream status: %s", status)
-            self.recording_data.append(indata.copy())
+            # 回调运行在 PortAudio 实时线程里，任何异常都不能让它逃逸到 cffi，
+            # 否则会出现 "Exception ignored from cffi callback" 且录音块丢失。
+            try:
+                self.recording_data.append(indata.copy())
+            except Exception as exc:
+                _log.error("[录音] 回调采集音频数据失败: %s", exc, exc_info=True)
 
         try:
             kwargs = dict(
@@ -396,14 +411,18 @@ class Recorder:
             raise AsrRuntimeError(f"启动录音失败: {str(exc)}") from exc
 
     def stop_recording(self) -> None:
-        if self.stream is None:
+        stream = self.stream
+        self.stream = None
+        if stream is None:
             return
 
-        try:
-            self.stream.stop()
-            self.stream.close()
-        finally:
-            self.stream = None
+        # stop()/close() 各自 try，避免一个失败就跳过另一个，导致 PortAudio
+        # 流泄漏、回调线程持续运行、内存不断累积（曾表现为 cffi 回调 MemoryError）。
+        for action in ("stop", "close"):
+            try:
+                getattr(stream, action)()
+            except Exception as exc:
+                _log.warning("[录音] stream.%s 失败: %s", action, exc)
 
     def save_recording(self, output_file: str | Path) -> Path:
         if not self.recording_data:
@@ -432,11 +451,109 @@ class Recorder:
 class TextComparer:
     """Text similarity helper reused by the backend ASR flow."""
 
+    _substitutions_cache: dict[str, str] | None = None
+    _substitutions_mtime: float = 0.0
+
+    @classmethod
+    def _get_substitutions_path(cls) -> Path:
+        return settings.WORKING_DIR / "asr_text_substitutions.json"
+
+    @classmethod
+    def load_substitutions(cls, force: bool = False) -> dict[str, str]:
+        """从 JSON 文件加载替换规则（带 mtime 缓存）。"""
+        path = cls._get_substitutions_path()
+        if not path.exists():
+            cls._substitutions_cache = {}
+            cls._substitutions_mtime = 0.0
+            return {}
+        try:
+            mtime = path.stat().st_mtime
+            if not force and cls._substitutions_cache is not None and cls._substitutions_mtime == mtime:
+                return cls._substitutions_cache
+            data = json.loads(path.read_text(encoding="utf-8"))
+            rules = {str(k).lower(): str(v) for k, v in data.items() if isinstance(data, dict)}
+            cls._substitutions_cache = rules
+            cls._substitutions_mtime = mtime
+            return rules
+        except (OSError, json.JSONDecodeError):
+            cls._substitutions_cache = {}
+            return {}
+
+    @classmethod
+    def save_substitutions(cls, rules: dict[str, str]) -> None:
+        """保存替换规则到 JSON 文件。"""
+        path = cls._get_substitutions_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        normalized = {str(k).lower(): str(v) for k, v in rules.items()}
+        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+        cls._substitutions_cache = normalized
+        cls._substitutions_mtime = path.stat().st_mtime
+
+    @classmethod
+    def get_substitutions(cls) -> dict[str, str]:
+        """获取当前替换规则。"""
+        if cls._substitutions_cache is None:
+            return cls.load_substitutions()
+        return cls._substitutions_cache
+
+    @classmethod
+    def apply_substitutions(cls, text: str) -> str:
+        """按规则依次替换文本（不区分大小写匹配）。"""
+        rules = cls.get_substitutions()
+        if not rules:
+            return text
+        for pattern, replacement in rules.items():
+            text = re.sub(re.escape(pattern), replacement, text, flags=re.IGNORECASE)
+        return text
+
+    _NUMBER_WORDS = {
+        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+        "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+        "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+        "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
+        "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+        "eighty": 80, "ninety": 90,
+        "first": 1, "second": 2, "third": 3, "fourth": 4,
+        "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
+        "ninth": 9, "tenth": 10,
+    }
+
     @staticmethod
     def clean_text(text: str) -> str:
         text = str(text or "").lower()
+        # 应用用户自定义替换规则（在标点移除和数字转换之前）
+        text = TextComparer.apply_substitutions(text)
+        # 将 "+" 和单词中的 "plus" 统一为分词 "plus"，确保 "Whale+" 和 "WhalePlus" 视为相同
+        text = re.sub(r"\+", " plus ", text)
+        text = re.sub(r"(\w)(plus)", r"\1 plus ", text)
         text = re.sub(r"[^\w\s]", "", text)
-        return re.sub(r"\s+", " ", text).strip()
+        # 将英文数字单词转为阿拉伯数字（volume four → volume 4, fifty three → 53）
+        words = text.split()
+        result = []
+        pending_tens = None
+        for w in words:
+            val = TextComparer._NUMBER_WORDS.get(w)
+            if val is None:
+                if pending_tens is not None:
+                    result.append(str(pending_tens))
+                    pending_tens = None
+                result.append(w)
+            elif val >= 20 and val % 10 == 0:
+                # 十位数（twenty, thirty, ...），先暂存
+                if pending_tens is not None:
+                    result.append(str(pending_tens))
+                pending_tens = val
+            else:
+                if pending_tens is not None:
+                    # 组合：fifty three → 53
+                    result.append(str(pending_tens + val))
+                    pending_tens = None
+                else:
+                    result.append(str(val))
+        if pending_tens is not None:
+            result.append(str(pending_tens))
+        return " ".join(result)
 
     @classmethod
     def cosine_similarity(cls, text1: str, text2: str) -> float:
@@ -493,6 +610,7 @@ class AsrService:
         self.reference_root = self._resolve_existing_dir(self.voice_project_root / "references", self.bundle_voice_project_root / "references")
         self.audio_root = self.voice_project_root / "audio"
         self.result_root = self.voice_project_root / "results"
+        self.log_root = self.voice_project_root / "logs"
         self._loaded_backend: _AsrBackend | None = None
         self._loaded_model_name = ""
         self._model_lock = Lock()
@@ -686,12 +804,12 @@ class AsrService:
 
         if missing and is_frozen_runtime:
             install_steps = [
-                "当前运行的是打包版 ADBControl.exe，不能通过给 exe 外部执行 pip install 直接补进已打包依赖。",
+                "当前运行的是打包版 AutoDeck.exe，不能通过给 exe 外部执行 pip install 直接补进已打包依赖。",
                 "请在用于执行 build_exe.bat 的 Python 环境中，先执行 python -m pip install -U pip。",
             ]
             install_steps.extend([f"在打包环境执行: {command}" for command in install_commands])
-            install_steps.append("重新运行 build_exe.bat 生成新的 ADBControl.exe，并替换当前 dist 目录中的程序。")
-            install_steps.append("重启新的 ADBControl.exe 后，再回到当前页面点击“刷新状态”。")
+            install_steps.append("重新运行 build_exe.bat 生成新的 AutoDeck.exe，并替换当前 dist 目录中的程序。")
+            install_steps.append("重启新的 AutoDeck.exe 后，再回到当前页面点击“刷新状态”。")
         else:
             install_steps = [
                 "建议使用独立的 Python 3.12 虚拟环境安装 ASR 依赖，避免与当前项目环境冲突。",
@@ -763,6 +881,215 @@ class AsrService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         target_path = self.audio_root / f"recording_{self._sanitize_case_name(case_title)}_{timestamp}.wav"
         return recorder.save_recording(target_path)
+
+    @staticmethod
+    def enhance_audio(audio_path: str | Path, target_db: float = -20.0, voice_boost: bool = True) -> Path:
+        """音频增强：音量归一化 + 人声频段增强，原地替换。
+
+        Args:
+            audio_path: WAV 文件路径
+            target_db: 目标音量（dB），默认 -20 dB
+            voice_boost: 是否增强人声频段（300Hz-3kHz），默认 True
+        """
+        from scipy.io import wavfile
+        from scipy.signal import butter, filtfilt
+
+        audio_path = Path(audio_path)
+
+        # 读取音频
+        sr, raw_data = wavfile.read(str(audio_path))
+        data = raw_data.astype(np.float64)
+        original_dtype = raw_data.dtype
+
+        # 归一化到 [-1, 1]
+        if np.issubdtype(original_dtype, np.integer):
+            max_val = np.iinfo(original_dtype).max
+            data = data / max_val
+
+        # 转为单声道处理
+        is_stereo = data.ndim > 1
+        if is_stereo:
+            data_mono = data.mean(axis=1)
+        else:
+            data_mono = data.copy()
+
+        # 1. 音量归一化
+        current_rms = np.sqrt(np.mean(data_mono ** 2))
+        if current_rms > 1e-6:  # 避免除以零
+            target_rms = 10 ** (target_db / 20)
+            gain = target_rms / current_rms
+            # 限制增益范围，避免过度放大。上限放宽到 200 倍以覆盖采集卡等
+            # 极弱信号（-60dB 级）录音，否则归一化后仍停留在 -50dB 附近无法识别。
+            gain = min(gain, 200.0)  # 最大放大 200 倍
+            gain = max(gain, 0.1)    # 最小缩小到 0.1 倍
+            data_mono = data_mono * gain
+            _log.info("[增强] 音量归一化: 增益=%.2f (原始 RMS=%.4f, 目标 RMS=%.4f)", gain, current_rms, target_rms)
+
+        # 2. 人声频段增强（带通滤波 + 增益叠加）
+        if voice_boost and sr > 6000:  # 采样率太低时跳过
+            # 设计带通滤波器：300Hz - 3kHz（人声主要频段）
+            low_freq = 300 / (sr / 2)
+            high_freq = min(3000 / (sr / 2), 0.95)  # 不超过奈奎斯特频率
+
+            if low_freq < high_freq:
+                b, a = butter(4, [low_freq, high_freq], btype='band')
+                voice_band = filtfilt(b, a, data_mono)
+                # 将人声频段叠加到原信号（增益 0.3）
+                data_mono = data_mono + 0.3 * voice_band
+                _log.info("[增强] 人声频段增强: 300Hz-3kHz, 增益=0.3")
+
+        # 防止削波
+        data_mono = np.clip(data_mono, -1.0, 1.0)
+
+        # 如果是立体声，将增强后的单声道应用到所有通道
+        if is_stereo:
+            # 保持原始的立体声平衡
+            gain_ratio = data_mono / (data.mean(axis=1) + 1e-10)
+            gain_ratio = np.clip(gain_ratio, 0.1, 10.0)
+            data = data * gain_ratio[:, np.newaxis]
+            data = np.clip(data, -1.0, 1.0)
+        else:
+            data = data_mono
+
+        # 转换回原始数据类型并写入
+        if np.issubdtype(original_dtype, np.integer):
+            data = (data * max_val).astype(original_dtype)
+        else:
+            data = data.astype(original_dtype)
+
+        wavfile.write(str(audio_path), sr, data)
+        duration = len(data) / sr
+        _log.info("[增强] 完成: %s (采样率=%d, 时长=%.2fs)", audio_path.name, sr, duration)
+        return audio_path
+
+    @staticmethod
+    def boost_volume(audio_path: str | Path, factor: float = 2.0) -> Path:
+        """对 WAV 文件做音量增益放大，原地替换。
+
+        Args:
+            audio_path: WAV 文件路径
+            factor: 放大倍数，默认 2.0（即增加 100%，音量翻倍）
+        """
+        from scipy.io import wavfile
+
+        audio_path = Path(audio_path)
+        sr, raw_data = wavfile.read(str(audio_path))
+        data = raw_data.astype(np.float64)
+        original_dtype = raw_data.dtype
+
+        # 归一化到 [-1, 1]
+        if np.issubdtype(original_dtype, np.integer):
+            max_val = np.iinfo(original_dtype).max
+            data = data / max_val
+
+        # 增益放大
+        data = data * factor
+
+        # 防止削波
+        data = np.clip(data, -1.0, 1.0)
+
+        # 转换回原始数据类型并写入
+        if np.issubdtype(original_dtype, np.integer):
+            data = (data * max_val).astype(original_dtype)
+        else:
+            data = data.astype(original_dtype)
+
+        wavfile.write(str(audio_path), sr, data)
+        _log.info("[音量增强] 完成: %s (倍率=%.2f, 采样率=%d)", audio_path.name, factor, sr)
+        return audio_path
+
+    @staticmethod
+    def reduce_noise(audio_path: str | Path) -> Path:
+        """对 WAV 文件做离线降噪（频谱门控），原地替换。若 noisereduce 未安装则跳过。"""
+        try:
+            import noisereduce as nr
+        except ImportError:
+            _log.warning("[降噪] noisereduce 未安装，跳过降噪: pip install noisereduce")
+            return Path(audio_path)
+
+        import soundfile as sf
+        from scipy.io import wavfile
+
+        audio_path = Path(audio_path)
+
+        # 用 scipy 读取 WAV（避免 libsndfile 对 wave 模块写出的文件兼容性问题导致 C 级崩溃）
+        sr, raw_data = wavfile.read(str(audio_path))
+        data = raw_data.astype(np.float64)
+        # 归一化整数格式到 [-1, 1] 范围
+        if np.issubdtype(raw_data.dtype, np.integer):
+            data = data / np.iinfo(raw_data.dtype).max
+        # 转为单声道处理
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        reduced = nr.reduce_noise(y=data, sr=sr, stationary=False)
+        sf.write(str(audio_path), reduced, sr)
+        _log.info("[降噪] 完成: %s (采样率=%d, 时长=%.2fs)", audio_path.name, sr, len(reduced) / sr)
+        return audio_path
+
+    @staticmethod
+    def adjust_speed(audio_path: str | Path, speed: float = 0.9) -> Path:
+        """调整音频播放速度，原地替换。使用 librosa 或 scipy 实现。
+
+        Args:
+            audio_path: WAV 文件路径
+            speed: 播放速度倍数，< 1 表示减速，> 1 表示加速。默认 0.9 倍速。
+        """
+        if speed <= 0:
+            raise ValueError(f"速度倍数必须大于 0，当前值: {speed}")
+
+        # 接近 1.0 时跳过处理
+        if abs(speed - 1.0) < 0.01:
+            return Path(audio_path)
+
+        audio_path = Path(audio_path)
+
+        # 尝试用 librosa 实现（质量更好）
+        try:
+            import librosa
+            import soundfile as sf
+
+            data, sr = librosa.load(str(audio_path), sr=None, mono=False)
+            # librosa.effects.time_stretch 需要单声道
+            if data.ndim > 1:
+                # 立体声：分别处理每个通道再合并
+                channels = []
+                for ch in range(data.shape[0]):
+                    stretched = librosa.effects.time_stretch(data[ch], rate=speed)
+                    channels.append(stretched)
+                result = np.stack(channels, axis=0)
+            else:
+                result = librosa.effects.time_stretch(data, rate=speed)
+
+            sf.write(str(audio_path), result.T if result.ndim > 1 else result, sr)
+            duration = len(result) / sr if result.ndim == 1 else result.shape[1] / sr
+            _log.info("[变速] 完成: %s (速度=%.2f, 采样率=%d, 时长=%.2fs)", audio_path.name, speed, sr, duration)
+            return audio_path
+        except ImportError:
+            pass
+
+        # 备选：使用 scipy 的简单重采样实现（改变速度同时改变音调）
+        try:
+            from scipy.io import wavfile
+            from scipy.signal import resample_poly
+            from math import gcd
+
+            sr, raw_data = wavfile.read(str(audio_path))
+            # 计算重采样比例：speed < 1 时减速（样本变多），speed > 1 时加速（样本变少）
+            new_sr = int(sr * speed)
+            g = gcd(new_sr, sr)
+            stretched = resample_poly(raw_data, sr // g, new_sr // g)
+
+            # 保持原始数据类型
+            if np.issubdtype(raw_data.dtype, np.integer):
+                max_val = np.iinfo(raw_data.dtype).max
+                stretched = np.clip(stretched, -max_val, max_val).astype(raw_data.dtype)
+
+            wavfile.write(str(audio_path), sr, stretched)
+            _log.info("[变速] 完成: %s (速度=%.2f, 采样率=%d, 时长=%.2fs)", audio_path.name, speed, sr, len(stretched) / sr)
+            return audio_path
+        except Exception as exc:
+            _log.warning("[变速] 处理失败，跳过: %s", exc)
+            return audio_path
 
     def save_transcript(self, audio_path: str | Path, transcript: str) -> Path:
         audio_stem = Path(audio_path).stem
@@ -989,8 +1316,7 @@ class AsrService:
             self._normalize_endpoint(os.environ.get("HF_ENDPOINT")),
         ]
         candidates = configured + [
-            self._normalize_endpoint(DEFAULT_HF_DOWNLOAD_ENDPOINT),
-            *[self._normalize_endpoint(item) for item in MIRROR_HF_DOWNLOAD_ENDPOINTS],
+            self._normalize_endpoint(ep) for ep in HF_MIRROR_ENDPOINTS
         ]
 
         ordered = []
@@ -1006,6 +1332,130 @@ class AsrService:
     def _summarize_download_error(exc: Exception) -> str:
         text = str(exc).strip().replace("\r", " ").replace("\n", " ")
         return text[:280] if text else exc.__class__.__name__
+
+    def _create_download_tqdm(self, progress_queue):
+        """创建一个自定义 tqdm 类，将进度推送到队列。"""
+        from tqdm.auto import tqdm as base_tqdm
+
+        class SseTqdm(base_tqdm):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._last_percent = -1
+
+            def update(self, n=1):
+                super().update(n)
+                if self.total and self.total > 0:
+                    percent = int(self.n / self.total * 100)
+                    if percent != self._last_percent:
+                        self._last_percent = percent
+                        progress_queue.put({
+                            "type": "progress",
+                            "percent": percent,
+                            "downloaded": self.n,
+                            "total": self.total,
+                            "desc": self.desc or "",
+                        })
+
+            def set_description(self, desc=None, refresh=True):
+                super().set_description(desc, refresh)
+
+        return SseTqdm
+
+    def _download_with_progress(self, model_name, repo_id, kind, progress_queue):
+        """带进度推送的下载生成器。"""
+        from queue import Empty
+
+        normalized_name = self._sanitize_model_name(model_name)
+        effective_repo_id = str(repo_id).strip()
+
+        if not self._dependency_available("huggingface_hub"):
+            progress_queue.put({"type": "error", "message": "未安装 huggingface_hub，无法下载模型"})
+            return
+
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            progress_queue.put({"type": "error", "message": "未安装 huggingface_hub，无法下载模型"})
+            return
+
+        target_dir = self.runtime_model_root / normalized_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        progress_queue.put({"type": "info", "message": f"开始下载 {normalized_name}..."})
+
+        download_endpoints = self._iter_download_endpoints()
+        download_errors = []
+        downloaded = False
+
+        tqdm_class = self._create_download_tqdm(progress_queue)
+
+        # 保存原始环境变量，下载完成后恢复
+        original_hf_endpoint = os.environ.get("HF_ENDPOINT")
+
+        for endpoint in download_endpoints:
+            effective_endpoint = endpoint or DEFAULT_HF_DOWNLOAD_ENDPOINT
+            progress_queue.put({"type": "info", "message": f"尝试端点: {effective_endpoint}"})
+
+            # 通过环境变量强制设置镜像端点，确保所有内部 API 调用都使用镜像
+            os.environ["HF_ENDPOINT"] = effective_endpoint
+
+            attempt_kwargs = {
+                "repo_id": effective_repo_id,
+                "local_dir": str(target_dir),
+                "local_dir_use_symlinks": False,
+                "endpoint": effective_endpoint,
+                "tqdm_class": tqdm_class,
+            }
+            try:
+                snapshot_download(**attempt_kwargs)
+                downloaded = True
+                break
+            except TypeError:
+                attempt_kwargs.pop("local_dir_use_symlinks", None)
+                attempt_kwargs.pop("tqdm_class", None)
+                attempt_kwargs.pop("endpoint", None)
+                try:
+                    snapshot_download(**attempt_kwargs)
+                    downloaded = True
+                    break
+                except Exception as exc:
+                    download_errors.append((effective_endpoint, self._summarize_download_error(exc)))
+            except Exception as exc:
+                download_errors.append((effective_endpoint, self._summarize_download_error(exc)))
+
+        # 恢复原始环境变量
+        if original_hf_endpoint is None:
+            os.environ.pop("HF_ENDPOINT", None)
+        else:
+            os.environ["HF_ENDPOINT"] = original_hf_endpoint
+
+        if not downloaded:
+            attempt_lines = "; ".join(
+                f"{endpoint}: {message}"
+                for endpoint, message in download_errors
+            ) or "未记录具体错误"
+            progress_queue.put({
+                "type": "error",
+                "message": (
+                    f"下载模型失败（仓库 {effective_repo_id}）。"
+                    f"已尝试端点：{'、'.join(download_endpoints) or DEFAULT_HF_DOWNLOAD_ENDPOINT}。"
+                    f"详细错误：{attempt_lines}。"
+                ),
+            })
+            return
+
+        self._write_backend_meta(target_dir, kind, repo_id=effective_repo_id)
+
+        if self.get_active_model() is None:
+            self.set_active_model(normalized_name)
+
+        progress_queue.put({
+            "type": "done",
+            "model_name": normalized_name,
+            "path": str(target_dir),
+            "repo_id": effective_repo_id,
+            "kind": kind,
+        })
 
     def download_cohere_transcribe(
         self,
@@ -1133,7 +1583,7 @@ class AsrService:
                     "name": COHERE_DEFAULT_MODEL_NAME,
                     "repo_id": COHERE_DEFAULT_REPO_ID,
                     "description": "Cohere Transcribe（2B Conformer，14 语言）",
-                }
+                },
             ],
         }
 

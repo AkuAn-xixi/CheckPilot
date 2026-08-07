@@ -8,7 +8,7 @@ export const messages = {
   'zh-CN': {
     app: {
       brandEyebrow: 'Precision Automation Workspace',
-      brandTitle: 'ADB 控制中心',
+      brandTitle: 'AutoDeck 自动测控台',
       currentSection: '当前模块',
       deviceConnection: '设备连接',
       platformAuth: '平台登录',
@@ -32,10 +32,6 @@ export const messages = {
         devices: {
           label: '设备管理',
           description: '连接、刷新并锁定目标设备'
-        },
-        commands: {
-          label: '命令执行',
-          description: '直接发送 ADB 指令与序列'
         },
         excel: {
           label: 'Excel 执行',
@@ -123,9 +119,8 @@ export const messages = {
       subtitle: '从 ADB 连接、即时指令到 Excel 回放、截图比对和按键监听，整个流程都在一个连续界面里完成，减少反复切换和状态丢失。',
       continueExcel: '继续执行 Excel 用例',
       selectDeviceFirst: '先选择设备',
-      openCommands: '打开命令执行',
       currentConnection: '当前连接',
-      deviceReady: '设备已就绪，可以直接进入 Excel 执行或命令执行。',
+      deviceReady: '设备已就绪，可以直接进入 Excel 执行。',
       bindDeviceFirst: '先在设备管理里绑定一个 ADB 设备，再开始后续流程。',
       detectedDevices: '已检测设备',
       deviceSwitchReady: '已发现可用设备，可在任意时刻切换控制目标。',
@@ -220,7 +215,9 @@ export const messages = {
         overviewHasFailures: '失败 {count} 条，需复核',
         overviewHasBlocked: '未完成 {count} 条',
         overviewPending: '暂无完整结果',
-        passRate: '通过率'
+        passRate: '通过率',
+        selectAll: '全选',
+        deleteSelected: '批量删除'
       },
       detail: {
         eyebrow: 'Inspector',
@@ -249,7 +246,10 @@ export const messages = {
         loadReportsFailed: '加载报告列表失败',
         loadDetailFailed: '加载报告详情失败',
         deleteConfirm: '确定要删除报告《{title}》吗？',
-        deleteReportFailed: '删除报告失败'
+        deleteReportFailed: '删除报告失败',
+        deleteBatchConfirm: '确定要删除选中的 {count} 份报告吗？',
+        deleteBatchSuccess: '已删除 {count} 份报告',
+        deleteBatchFailed: '批量删除报告失败'
       }
     },
     deviceManagement: {
@@ -286,7 +286,7 @@ export const messages = {
       formatTitle: '命令格式说明',
       formatIntro: '每条命令由三部分组成，用斜杠分隔：',
       keyName: '按键名称（如 OK, HOME, UP, DOWN 等）',
-      repeat: '执行次数（整数）',
+      repeat: '执行次数（整数；支持 X 随机次数，X:(A:B) 随机 A~B 次，X:N 随机 1~N 次，仅 X 随机 1~延迟秒，随机为 0 时跳过该指令）',
       delay: '延迟时间（秒，支持小数）',
       formatOutro: '多条命令之间用逗号分隔。',
       examplesTitle: '示例命令',
@@ -312,7 +312,9 @@ export const messages = {
       subtitle: '先选择功能，再进入对应工作区。目录页本身不直接展开具体内容，避免初始进入时出现整页下拉条。',
       enterFeature: '进入功能',
       alerts: {
-        selectDeviceFirst: '请先选择设备，选择后才能进入该模块。'
+        noDeviceTitle: '未连接设备',
+        noDeviceBody: '当前没有连接任何设备，进入后执行功能将不会响应。请先在设备管理中连接设备。',
+        noDeviceConfirm: '知道了'
       },
       visualCheck: {
         label: '图片校验执行',
@@ -327,37 +329,14 @@ export const messages = {
     },
     excelExecution: {
       title: '图片校验执行',
+      noticeMarquee: '在使用AutoDeck自动测控台时，请勿打开Excel源文件，避免造成文件损坏。',
       chooseExcel: '选择Excel文件',
-      imageModelSetup: '图片模型设置',
-      imageModelTitle: 'DINOv2-Base 图片比对',
-      imageModelSubtitle: '未选择模型时继续使用当前 OpenCV 方案；下载并选择 DINOv2-Base 后，图片校验会切换到模型比对。',
-      activeImageModel: '当前模型：{model}',
-      noActiveImageModel: '当前使用 OpenCV',
-      compareBackend: '当前比对方案：{backend}',
-      compareBackendOpenCv: 'OpenCV',
-      compareBackendDinov2: 'DINOv2（{model}）',
-      downloadedModels: '已下载模型 {count} 个',
-      runtimeStatus: '运行环境：{status}',
-      dinoDependencyWarning: '当前缺少 DINOv2 运行依赖，但图片校验仍可继续使用 OpenCV。',
-      currentPython: '当前 Python：{version}',
-      recommendedPython: '推荐 Python：{version}',
-      missingDependencies: '缺失依赖：{dependencies}',
-      handlingSteps: '处理步骤',
-      downloadRecommendedModel: '下载 DINOv2-Base',
-      downloadingImageModel: '正在下载 DINOv2-Base...',
-      useOpenCv: '切回 OpenCV',
-      noDownloadedModels: '尚未下载图片模型；若不选择模型，系统会继续使用默认 OpenCV。',
       noImageReports: '还没有图片校验报告。执行批量用例后会在这里显示。',
       reportReadyHint: '报告模块默认折叠，需要时点击展开查看。',
       fileReadyHint: '文件已选定，需要调整时可展开重新选择。',
       changeSelectedFile: '更换文件',
-      changeSelectedModel: '更换模型',
       expandReportPanel: '展开报告',
       collapseReportPanel: '收起报告',
-      modelInUse: '使用中',
-      modelFiles: '{count} 个文件',
-      selectedImageModel: '当前模型',
-      useThisImageModel: '使用此模型',
       filterResult: '筛选结果：',
       uploadTip1: '请将Excel文件放在应用程序所在的目录中，支持 .xlsx 和 .xls 格式。',
       uploadTip2: '或者使用上面的按钮上传Excel文件。',
@@ -365,6 +344,9 @@ export const messages = {
       batchExecute: '批量执行 ({count})',
       executeAll: '执行全部用例 ({count})',
       stopAll: '停止所有执行',
+      addCase: '新增用例',
+      deleteCase: '删除',
+      deleteSelected: '批量删除',
       selectedCasesLabel: '已选用例',
       allCasesLabel: '当前 Excel 全部用例',
       batchProgressTitle: '用例执行进度',
@@ -462,6 +444,7 @@ export const messages = {
       devicePreviewSourceLabel: '画面来源',
       devicePreviewSourceAdb: 'ADB 截图',
       devicePreviewSourceCaptureCard: '采集卡',
+      devicePreviewSourceScrcpy: 'scrcpy 串流',
       devicePreviewCaptureCardLabel: '采集卡画面',
       refreshDevicePreview: '刷新画面',
       devicePreviewRefreshing: '刷新中…',
@@ -507,16 +490,6 @@ export const messages = {
       saving: '保存中...',
       rowFallbackTitle: '第 {row} 行',
       alerts: {
-        loadImageModelStatusFailed: '加载图片模型状态失败',
-        downloadImageModelSuccess: '图片模型已下载完成：{model}。如需启用，请点击“使用此模型”。',
-        downloadImageModelFailed: '下载图片模型失败',
-        selectImageModelSuccess: '已切换图片模型：{model}',
-        selectImageModelFailed: '切换图片模型失败',
-        clearImageModelFailed: '切回 OpenCV 失败',
-        switchToOpenCvSuccess: '已切回 OpenCV 图片比对',
-        deleteImageModelConfirm: '确定要删除图片模型 {model} 吗？',
-        deleteImageModelSuccess: '图片模型已删除：{model}',
-        deleteImageModelFailed: '删除图片模型失败',
         refreshFolderReminder: '刷新后需重新选择本地校验图片文件夹：{name}',
         sameImageNotFound: '在所选文件夹中未找到同名图片：{name}',
         selectFileFirst: '请先选择一个Excel文件',
@@ -536,6 +509,12 @@ export const messages = {
         reportGenerated: '批量执行报告已生成：{title}',
         reportGenerateFailed: '生成批量执行报告失败',
         allStopped: '所有执行已停止',
+        otherModuleRunning: '其他模块（ASR 执行）正在进行，请先停止后再开始图片执行',
+        newCaseTitlePrompt: '请输入新用例标题（留空自动生成）',
+        deleteCaseConfirm: '确定删除该用例吗？',
+        deleteSelectedConfirm: '确定删除选中的 {count} 条用例吗？',
+        addCaseFailed: '新增用例失败',
+        deleteCaseFailed: '删除用例失败',
         uploadSuccess: '文件上传成功：{filename}',
         uploadFailed: '上传文件失败',
         uploadFailedWithDetail: '上传文件失败：{detail}',
@@ -566,6 +545,12 @@ export const messages = {
         leavePageConfirm: '您正在前往其它页面，将清除测试用例结果的图片',
         clickToToggleResult: '点击选择结果：PASS / FAIL / 清空',
         toggleResultFailed: '切换结果写入失败'
+      },
+      invalidKeysToast: {
+        title: '存在不合法按键',
+        body: '以下按键名称未在客制化中配置或缺少键值映射，执行时将无法响应。',
+        goCustomization: '前往客制化添加',
+        ignore: '忽略'
       }
     },
     excelAsr: {
@@ -591,6 +576,7 @@ export const messages = {
       downloadCohereHint: '从 Hugging Face 镜像拉取 cohere-transcribe-03-2026（约 4 GB）',
       backendQwen: 'Qwen3-ASR',
       backendCohere: 'Cohere Transcribe',
+      downloadingModel: '正在下载模型…',
       currentDevice: '当前设备：{device}',
       environmentStatus: '环境状态：{status}',
       modelInUse: '当前使用',
@@ -604,6 +590,9 @@ export const messages = {
       batchExecute: '批量执行 ({count})',
       executeAll: '执行全部用例 ({count})',
       stopAll: '停止所有执行',
+      addCase: '新增用例',
+      deleteCase: '删除',
+      deleteSelected: '批量删除',
       selectedCasesLabel: '已选用例',
       allCasesLabel: '当前 Excel 全部用例',
       openLatestReport: '打开最新报告',
@@ -634,6 +623,8 @@ export const messages = {
         deleteModelFailed: '删除模型失败',
         deleteModelSuccess: '模型 {deleted} 已删除。',
         deleteModelSuccessWithActive: '模型 {deleted} 已删除，当前模型已切换为 {active}。',
+        downloadModelFailed: '下载模型失败',
+        downloadModelSuccess: '模型 {name} 下载完成。',
         updateCaseFailedSimple: '更新用例字段失败',
         updateCaseFailed: '更新用例字段失败：{detail}',
         selectFileFirst: '请先选择一个 Excel 文件',
@@ -653,7 +644,13 @@ export const messages = {
         batchComplete: '批量执行{label}完成，共执行 {count} 条',
         reportGenerated: '批量执行报告已生成：{title}',
         reportGenerateFailed: '生成批量执行报告失败',
-        allStopped: '所有执行已停止'
+        allStopped: '所有执行已停止',
+        otherModuleRunning: '其他模块（图片执行）正在进行，请先停止后再开始 ASR 执行',
+        newCaseTitlePrompt: '请输入新用例标题（留空自动生成）',
+        deleteCaseConfirm: '确定删除该用例吗？',
+        deleteSelectedConfirm: '确定删除选中的 {count} 条用例吗？',
+        addCaseFailed: '新增用例失败',
+        deleteCaseFailed: '删除用例失败'
       }
     },
     keyMonitor: {
@@ -682,7 +679,7 @@ export const messages = {
         remove: '删除',
         action: '操作'
       },
-      monitorPlaceholder: '监听到的按键序列会显示在这里，格式为 KEY/次数/延迟,KEY/次数/延迟',
+      monitorPlaceholder: '监听到的按键序列会显示在这里，格式为 KEY/次数/延迟,KEY/次数/延迟；次数可用 X 表示随机（X:(A:B) 随机 A~B 次，X:N 随机 1~N 次，仅 X 随机 1~延迟秒，随机为 0 时跳过该指令）',
       editPlaceholder: '监听结束后，可直接在这里修正错误指令或延迟',
       monitoring: '正在监听，请在设备上按键…',
       sourcePlaceholder: '输入或选择待纠正指令，如 LIBRARY',
@@ -801,6 +798,7 @@ export const messages = {
       devicePreviewSourceLabel: '画面来源',
       devicePreviewSourceAdb: '原实现（ADB 截图）',
       devicePreviewSourceCaptureCard: '采集卡',
+      devicePreviewSourceScrcpy: 'scrcpy 串流',
       devicePreviewCaptureCardLabel: '采集卡画面',
       refreshDevicePreview: '刷新画面',
       devicePreviewRefreshing: '刷新中…',
@@ -869,7 +867,7 @@ export const messages = {
         saveDevicePreviewSelectionFailed: '保存框选截图失败',
         syncDevicePreviewCheckPicFailed: '截图已保存，但同步 Excel 的 checkPic 失败',
         screenshotQueuePartialFailed: '已保存 {success} 张，{failed} 张保存失败，失败项已留在队列中',
-        caseAlreadyWritten: '该用例已写入过，请开启 Assert 模式后重试'
+        caseAlreadyWritten: '该用例已写入过，请开启 Assert 或 TTS 模式后重试'
       },
       assertModal: {
         title: '设置校验次数',
@@ -883,6 +881,19 @@ export const messages = {
         placeholder: 'Assert/1/1',
         confirm: 'OK',
         emptyWarning: 'Assert 格式不能为空'
+      },
+      textSubstitutions: {
+        title: '文本替换规则',
+        subtitle: 'ASR 识别结果会在比对前按以下规则自动替换（不区分大小写）。',
+        originalLabel: '识别到的文本',
+        replacementLabel: '替换为',
+        addRule: '添加规则',
+        save: '保存',
+        saving: '保存中…',
+        noRules: '暂无替换规则，点击"添加规则"开始。',
+        loadFailed: '加载替换规则失败',
+        saveFailed: '保存替换规则失败',
+        saveSuccess: '替换规则已保存'
       }
     },
     customization: {
@@ -924,11 +935,19 @@ export const messages = {
       columns: {
         keyName: '按键名称',
         keyCode: '键值 (keycode)',
-        type: '类型'
+        type: '类型',
+        command: 'ADB 命令'
       },
       custom: '自定义',
       default: '默认',
       mappingCount: '共 {total} 条映射，{custom} 条自定义覆盖',
+      customCommands: '自定义 ADB 命令',
+      customCommandsDesc: '为按键配置任意 adb 命令（如 am force-stop）。执行时系统自动补上 adb -s <当前设备> 前缀。',
+      commandKeyNamePlaceholder: '按键名，如 CLEARNETFLIX',
+      commandPlaceholder: 'adb 命令，如 adb shell am force-stop com.netflix.ninja',
+      commandCount: '共 {count} 条自定义命令',
+      resetCommandsTitle: '确认清空自定义命令？',
+      resetCommandsBody: '将清除「{name}」中的所有自定义命令，此操作不可撤销。',
       createModalTitle: '新建方案',
       createModalPlaceholder: '方案名称',
       create: '创建',
@@ -967,7 +986,11 @@ export const messages = {
         keyCodeSaved: '键值已保存',
         deleteFailed: '删除失败',
         restoreKeyCodeSuccess: '已恢复为全部默认键值',
-        restoredDefaultKeyCode: '"{name}" 已还原为默认键值'
+        restoredDefaultKeyCode: '"{name}" 已还原为默认键值',
+        loadCommandsFailed: '加载自定义命令失败',
+        commandSaved: '自定义命令已保存',
+        commandDeleted: '"{name}" 已删除',
+        commandCleared: '已清空自定义命令'
       }
     },
     settings: {
@@ -983,10 +1006,10 @@ export const messages = {
       globalDelayPlaceholder: '输入全局延迟时间',
       about: '关于',
       appName: '应用名称',
-      appNameValue: 'ADB 控制工具',
+      appNameValue: 'AutoDeck 自动测控台',
       version: '版本',
       description: '描述',
-      descriptionValue: '基于Web的ADB设备控制和命令执行工具',
+      descriptionValue: '基于Web的自动测控台：ADB设备控制、Excel测试执行与结果校验',
       features: '功能',
       featureList: {
         devices: '设备管理和选择',
@@ -999,12 +1022,33 @@ export const messages = {
         loadFailed: '加载设置失败',
         saveSuccess: '设置已保存'
       }
+    },
+    executionCard: {
+      imageExecution: '图片执行',
+      asrExecution: 'ASR 执行',
+      running: '执行中',
+      completed: '已完成',
+      stopped: '已停止',
+      currentTask: '当前任务',
+      executed: '已执行',
+      passed: '通过',
+      failed: '失败',
+      pending: '待执行',
+      unlimited: '不限',
+      stop: '停止执行',
+      close: '关闭',
+      expand: '展开',
+      collapse: '收起',
+      stoppedPrompt: '任务已停止',
+      blockedImageToAsr: '图片执行进行中，暂不能进入 ASR 模块',
+      blockedAsrToImage: 'ASR 执行进行中，暂不能进入图片模块',
+      enterModule: '查看任务'
     }
   },
   'en-US': {
     app: {
       brandEyebrow: 'Precision Automation Workspace',
-      brandTitle: 'ADB Control Center',
+      brandTitle: 'AutoDeck',
       currentSection: 'Current Module',
       deviceConnection: 'Device Connection',
       platformAuth: 'Platform Login',
@@ -1028,10 +1072,6 @@ export const messages = {
         devices: {
           label: 'Devices',
           description: 'Connect, refresh, and lock a target device'
-        },
-        commands: {
-          label: 'Commands',
-          description: 'Send ADB commands and sequences directly'
         },
         excel: {
           label: 'Excel Runs',
@@ -1119,9 +1159,8 @@ export const messages = {
       subtitle: 'From ADB connectivity and live commands to Excel playback, screenshot comparison, and key monitoring, the full workflow stays in one continuous interface.',
       continueExcel: 'Continue Excel execution',
       selectDeviceFirst: 'Select a device first',
-      openCommands: 'Open command execution',
       currentConnection: 'Current connection',
-      deviceReady: 'The device is ready. You can go straight to Excel execution or command execution.',
+      deviceReady: 'The device is ready. You can go straight to Excel execution.',
       bindDeviceFirst: 'Bind an ADB device in Device Management before continuing.',
       detectedDevices: 'Detected devices',
       deviceSwitchReady: 'Available devices can be switched at any time.',
@@ -1216,7 +1255,9 @@ export const messages = {
         overviewHasFailures: '{count} failed case(s), review required',
         overviewHasBlocked: '{count} unfinished case(s)',
         overviewPending: 'No complete result yet',
-        passRate: 'Pass rate'
+        passRate: 'Pass rate',
+        selectAll: 'Select all',
+        deleteSelected: 'Delete selected'
       },
       detail: {
         eyebrow: 'Inspector',
@@ -1245,7 +1286,10 @@ export const messages = {
         loadReportsFailed: 'Failed to load report list',
         loadDetailFailed: 'Failed to load report detail',
         deleteConfirm: 'Are you sure you want to delete report "{title}"?',
-        deleteReportFailed: 'Failed to delete report'
+        deleteReportFailed: 'Failed to delete report',
+        deleteBatchConfirm: 'Delete the {count} selected report(s)?',
+        deleteBatchSuccess: '{count} report(s) deleted',
+        deleteBatchFailed: 'Failed to delete selected reports'
       }
     },
     deviceManagement: {
@@ -1282,7 +1326,7 @@ export const messages = {
       formatTitle: 'Command format',
       formatIntro: 'Each command has three slash-separated parts:',
       keyName: 'Key name (for example OK, HOME, UP, DOWN)',
-      repeat: 'Repeat count (integer)',
+      repeat: 'Repeat count (integer; X:(A:B) random A~B, X:N random 1~N, bare X random 1~delay seconds; 0 skips the command)',
       delay: 'Delay in seconds (decimals supported)',
       formatOutro: 'Separate multiple commands with commas.',
       examplesTitle: 'Example commands',
@@ -1308,7 +1352,9 @@ export const messages = {
       subtitle: 'Choose a feature first, then enter its workspace. The directory page itself stays compact to avoid a large initial scroll area.',
       enterFeature: 'Open feature',
       alerts: {
-        selectDeviceFirst: 'Please select a device first. You can enter this module after a device is selected.'
+        noDeviceTitle: 'No device connected',
+        noDeviceBody: 'No device is currently connected. Execution features will not respond. Please connect a device in Device Management first.',
+        noDeviceConfirm: 'Got it'
       },
       visualCheck: {
         label: 'Image validation execution',
@@ -1323,37 +1369,14 @@ export const messages = {
     },
     excelExecution: {
       title: 'Image Validation Execution',
+      noticeMarquee: 'When using AutoDeck, please do not open Excel files to avoid file corruption.',
       chooseExcel: 'Choose Excel file',
-      imageModelSetup: 'Image Model Setup',
-      imageModelTitle: 'DINOv2-Base Image Matching',
-      imageModelSubtitle: 'If no model is selected, the current OpenCV flow remains active. After downloading and selecting DINOv2-Base, image verification switches to model-based matching.',
-      activeImageModel: 'Active model: {model}',
-      noActiveImageModel: 'Using OpenCV',
-      compareBackend: 'Current matching backend: {backend}',
-      compareBackendOpenCv: 'OpenCV',
-      compareBackendDinov2: 'DINOv2 ({model})',
-      downloadedModels: '{count} model(s) downloaded',
-      runtimeStatus: 'Runtime status: {status}',
-      dinoDependencyWarning: 'DINOv2 runtime dependencies are missing, but image verification can still use OpenCV.',
-      currentPython: 'Current Python: {version}',
-      recommendedPython: 'Recommended Python: {version}',
-      missingDependencies: 'Missing dependencies: {dependencies}',
-      handlingSteps: 'Handling steps',
-      downloadRecommendedModel: 'Download DINOv2-Base',
-      downloadingImageModel: 'Downloading DINOv2-Base...',
-      useOpenCv: 'Switch to OpenCV',
-      noDownloadedModels: 'No image model has been downloaded yet. If you do not select one, the system continues to use OpenCV.',
       noImageReports: 'There are no image validation reports yet. They will appear here after a batch run.',
       reportReadyHint: 'The report panel is collapsed by default. Expand it when needed.',
       fileReadyHint: 'The file is selected. Expand this panel when you need to change it.',
       changeSelectedFile: 'Change file',
-      changeSelectedModel: 'Change model',
       expandReportPanel: 'Expand reports',
       collapseReportPanel: 'Collapse reports',
-      modelInUse: 'In use',
-      modelFiles: '{count} file(s)',
-      selectedImageModel: 'Current model',
-      useThisImageModel: 'Use this model',
       filterResult: 'Filter result:',
       uploadTip1: 'Place Excel files in the application directory. Both .xlsx and .xls are supported.',
       uploadTip2: 'Or upload an Excel file using the button above.',
@@ -1361,6 +1384,9 @@ export const messages = {
       batchExecute: 'Batch run ({count})',
       executeAll: 'Run all cases ({count})',
       stopAll: 'Stop all runs',
+      addCase: 'Add case',
+      deleteCase: 'Delete',
+      deleteSelected: 'Delete selected',
       selectedCasesLabel: 'selected cases',
       allCasesLabel: 'all cases in the current Excel file',
       batchProgressTitle: 'Case execution progress',
@@ -1458,6 +1484,7 @@ export const messages = {
       devicePreviewSourceLabel: 'Preview source',
       devicePreviewSourceAdb: 'ADB screenshot',
       devicePreviewSourceCaptureCard: 'Capture card',
+      devicePreviewSourceScrcpy: 'scrcpy stream',
       devicePreviewCaptureCardLabel: 'Capture card stream',
       refreshDevicePreview: 'Refresh',
       devicePreviewRefreshing: 'Refreshing…',
@@ -1503,16 +1530,6 @@ export const messages = {
       saving: 'Saving...',
       rowFallbackTitle: 'Row {row}',
       alerts: {
-        loadImageModelStatusFailed: 'Failed to load image model status',
-        downloadImageModelSuccess: 'Image model downloaded: {model}. Select it to enable DINOv2 matching.',
-        downloadImageModelFailed: 'Failed to download the image model',
-        selectImageModelSuccess: 'Image model selected: {model}',
-        selectImageModelFailed: 'Failed to select the image model',
-        clearImageModelFailed: 'Failed to switch back to OpenCV',
-        switchToOpenCvSuccess: 'Switched back to OpenCV image matching',
-        deleteImageModelConfirm: 'Are you sure you want to delete the image model {model}?',
-        deleteImageModelSuccess: 'Image model deleted: {model}',
-        deleteImageModelFailed: 'Failed to delete the image model',
         refreshFolderReminder: 'After refresh, reselect the local verification image folder: {name}',
         sameImageNotFound: 'No image with the same name was found in the selected folder: {name}',
         selectFileFirst: 'Please choose an Excel file first',
@@ -1532,6 +1549,12 @@ export const messages = {
         reportGenerated: 'Batch execution report generated: {title}',
         reportGenerateFailed: 'Failed to generate the batch execution report',
         allStopped: 'All executions were stopped',
+        otherModuleRunning: 'Another module (ASR execution) is running; stop it before starting image execution',
+        newCaseTitlePrompt: 'Enter a title for the new case (leave empty to auto-generate)',
+        deleteCaseConfirm: 'Delete this case?',
+        deleteSelectedConfirm: 'Delete the {count} selected case(s)?',
+        addCaseFailed: 'Failed to add case',
+        deleteCaseFailed: 'Failed to delete case',
         uploadSuccess: 'File uploaded successfully: {filename}',
         uploadFailed: 'File upload failed',
         uploadFailedWithDetail: 'File upload failed: {detail}',
@@ -1562,6 +1585,12 @@ export const messages = {
         leavePageConfirm: 'You are leaving this page. Result screenshots will be cleared.',
         clickToToggleResult: 'Click to select: PASS / FAIL / Clear',
         toggleResultFailed: 'Failed to write result'
+      },
+      invalidKeysToast: {
+        title: 'Invalid keys detected',
+        body: 'The following key names are not configured in customization or lack keycode mappings. They will not respond during execution.',
+        goCustomization: 'Go to Customization',
+        ignore: 'Ignore'
       }
     },
     excelAsr: {
@@ -1587,6 +1616,7 @@ export const messages = {
       downloadCohereHint: 'Fetch cohere-transcribe-03-2026 (~4 GB) from a Hugging Face mirror',
       backendQwen: 'Qwen3-ASR',
       backendCohere: 'Cohere Transcribe',
+      downloadingModel: 'Downloading model…',
       currentDevice: 'Current device: {device}',
       environmentStatus: 'Environment status: {status}',
       modelInUse: 'In use',
@@ -1600,6 +1630,9 @@ export const messages = {
       batchExecute: 'Batch run ({count})',
       executeAll: 'Run all cases ({count})',
       stopAll: 'Stop all runs',
+      addCase: 'Add case',
+      deleteCase: 'Delete',
+      deleteSelected: 'Delete selected',
       selectedCasesLabel: 'selected cases',
       allCasesLabel: 'all cases in the current Excel file',
       openLatestReport: 'Open latest report',
@@ -1630,6 +1663,8 @@ export const messages = {
         deleteModelFailed: 'Failed to delete model',
         deleteModelSuccess: 'Model {deleted} has been deleted.',
         deleteModelSuccessWithActive: 'Model {deleted} has been deleted. The active model is now {active}.',
+        downloadModelFailed: 'Failed to download model',
+        downloadModelSuccess: 'Model {name} has been downloaded.',
         updateCaseFailedSimple: 'Failed to update case fields',
         updateCaseFailed: 'Failed to update case fields: {detail}',
         selectFileFirst: 'Please choose an Excel file first',
@@ -1649,7 +1684,13 @@ export const messages = {
         batchComplete: 'Batch execution for {label} completed, {count} row(s) executed',
         reportGenerated: 'Batch execution report generated: {title}',
         reportGenerateFailed: 'Failed to generate the batch execution report',
-        allStopped: 'All executions were stopped'
+        allStopped: 'All executions were stopped',
+        otherModuleRunning: 'Another module (image execution) is running; stop it before starting ASR execution',
+        newCaseTitlePrompt: 'Enter a title for the new case (leave empty to auto-generate)',
+        deleteCaseConfirm: 'Delete this case?',
+        deleteSelectedConfirm: 'Delete the {count} selected case(s)?',
+        addCaseFailed: 'Failed to add case',
+        deleteCaseFailed: 'Failed to delete case'
       }
     },
     keyMonitor: {
@@ -1678,7 +1719,7 @@ export const messages = {
         remove: 'Remove',
         action: 'Action'
       },
-      monitorPlaceholder: 'Captured key sequences will appear here in the format KEY/count/delay,KEY/count/delay',
+      monitorPlaceholder: 'Captured key sequences will appear here in the format KEY/count/delay,KEY/count/delay; count can be X for random (X:(A:B) random A~B, X:N random 1~N, bare X random 1~delay seconds; 0 skips the command)',
       editPlaceholder: 'After monitoring ends, you can correct wrong commands or delays directly here.',
       monitoring: 'Monitoring is active. Press keys on the device…',
       sourcePlaceholder: 'Enter or choose the command to correct, for example LIBRARY',
@@ -1797,6 +1838,7 @@ export const messages = {
       devicePreviewSourceLabel: 'Preview source',
       devicePreviewSourceAdb: 'Original mode (ADB screenshot)',
       devicePreviewSourceCaptureCard: 'Capture card',
+      devicePreviewSourceScrcpy: 'scrcpy stream',
       devicePreviewCaptureCardLabel: 'Capture card preview',
       refreshDevicePreview: 'Refresh preview',
       devicePreviewRefreshing: 'Refreshing…',
@@ -1865,7 +1907,7 @@ export const messages = {
         saveDevicePreviewSelectionFailed: 'Failed to save the cropped screenshot',
         syncDevicePreviewCheckPicFailed: 'The screenshot was saved, but updating Excel checkPic failed',
         screenshotQueuePartialFailed: '{success} saved, {failed} failed (failed items kept in queue)',
-        caseAlreadyWritten: 'This case has already been written. Please enable Assert mode and try again.'
+        caseAlreadyWritten: 'This case has already been written. Please enable Assert or TTS mode and try again.'
       },
       assertModal: {
         title: 'Set Verify Count',
@@ -1879,6 +1921,19 @@ export const messages = {
         placeholder: 'Assert/1/1',
         confirm: 'OK',
         emptyWarning: 'Assert format cannot be empty'
+      },
+      textSubstitutions: {
+        title: 'Text Substitution Rules',
+        subtitle: 'ASR results are automatically replaced according to the following rules before comparison (case-insensitive).',
+        originalLabel: 'Recognized text',
+        replacementLabel: 'Replace with',
+        addRule: 'Add Rule',
+        save: 'Save',
+        saving: 'Saving…',
+        noRules: 'No substitution rules yet. Click "Add Rule" to start.',
+        loadFailed: 'Failed to load substitution rules',
+        saveFailed: 'Failed to save substitution rules',
+        saveSuccess: 'Substitution rules saved'
       }
     },
     customization: {
@@ -1920,11 +1975,19 @@ export const messages = {
       columns: {
         keyName: 'Key name',
         keyCode: 'Keycode',
-        type: 'Type'
+        type: 'Type',
+        command: 'ADB command'
       },
       custom: 'Custom',
       default: 'Default',
       mappingCount: '{total} mappings, {custom} custom override(s)',
+      customCommands: 'Custom ADB commands',
+      customCommandsDesc: 'Map a key name to an arbitrary adb command (e.g. am force-stop). The system prepends `adb -s <current device>` automatically.',
+      commandKeyNamePlaceholder: 'Key name, for example CLEARNETFLIX',
+      commandPlaceholder: 'adb command, for example adb shell am force-stop com.netflix.ninja',
+      commandCount: '{count} custom command(s)',
+      resetCommandsTitle: 'Clear custom commands?',
+      resetCommandsBody: 'This clears all custom commands in “{name}”. This action cannot be undone.',
       createModalTitle: 'Create scheme',
       createModalPlaceholder: 'Scheme name',
       create: 'Create',
@@ -1963,7 +2026,11 @@ export const messages = {
         keyCodeSaved: 'Keycode saved',
         deleteFailed: 'Delete failed',
         restoreKeyCodeSuccess: 'All default keycodes restored',
-        restoredDefaultKeyCode: '“{name}” was restored to the default keycode'
+        restoredDefaultKeyCode: '“{name}” was restored to the default keycode',
+        loadCommandsFailed: 'Failed to load custom commands',
+        commandSaved: 'Custom command saved',
+        commandDeleted: '“{name}” was deleted',
+        commandCleared: 'Custom commands cleared'
       }
     },
     settings: {
@@ -1979,10 +2046,10 @@ export const messages = {
       globalDelayPlaceholder: 'Enter the global delay',
       about: 'About',
       appName: 'Application name',
-      appNameValue: 'ADB Control Tool',
+      appNameValue: 'AutoDeck',
       version: 'Version',
       description: 'Description',
-      descriptionValue: 'A web-based ADB device control and command execution tool',
+      descriptionValue: 'A web-based automation test deck for ADB device control, Excel-driven test execution and result verification',
       features: 'Features',
       featureList: {
         devices: 'Device management and selection',
@@ -1995,6 +2062,27 @@ export const messages = {
         loadFailed: 'Failed to load settings',
         saveSuccess: 'Settings saved'
       }
+    },
+    executionCard: {
+      imageExecution: 'Image Execution',
+      asrExecution: 'ASR Execution',
+      running: 'Running',
+      completed: 'Completed',
+      stopped: 'Stopped',
+      currentTask: 'Current Task',
+      executed: 'Executed',
+      passed: 'Passed',
+      failed: 'Failed',
+      pending: 'Pending',
+      unlimited: 'Unlimited',
+      stop: 'Stop',
+      close: 'Close',
+      expand: 'Expand',
+      collapse: 'Collapse',
+      stoppedPrompt: 'Task stopped',
+      blockedImageToAsr: 'Image execution in progress; the ASR module is temporarily unavailable',
+      blockedAsrToImage: 'ASR execution in progress; the image module is temporarily unavailable',
+      enterModule: 'View task'
     }
   }
 }

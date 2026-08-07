@@ -15,75 +15,56 @@
         </router-link>
       </div>
       <div class="key-monitor-layout">
-        <div class="key-monitor-main bg-white border rounded-lg p-4 w-full">
-        <div class="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+        <div class="key-monitor-main w-full">
+        <div class="rounded-xl border border-slate-200 bg-white p-5">
 
           <div v-if="tmsError" class="text-sm text-danger mb-3">{{ tmsError }}</div>
           <div v-else-if="!tmsLoadingProjects && tmsProjects.length === 0" class="text-sm text-gray-500 mb-3">
             {{ $t('keyMonitor.remoteProjectsEmpty') }}
           </div>
 
-          <div class="grid gap-4 lg:grid-cols-2 lg:items-start">
+          <div class="grid gap-4 lg:grid-cols-2 lg:items-stretch">
             <div>
               <div class="grid gap-3 sm:grid-cols-2">
                 <label class="grid gap-1 min-w-0">
                   <span class="text-sm font-medium text-gray-700">{{ $t('keyMonitor.remoteProject') }}</span>
-                  <select
+                  <CustomSelect
                     v-model="selectedTmsProjectId"
-                    class="form-select"
+                    :options="tmsProjectOptions"
                     :disabled="tmsLoadingProjects || tmsLoadingModules || tmsLoadingTestcases"
+                    :placeholder="$t('keyMonitor.selectRemoteProject')"
                     @change="handleTmsProjectChange"
-                  >
-                    <option value="">{{ $t('keyMonitor.selectRemoteProject') }}</option>
-                    <option v-for="project in tmsProjects" :key="project.id" :value="String(project.id)">
-                      {{ project.name }}
-                    </option>
-                  </select>
+                  />
                 </label>
 
                 <label class="grid gap-1 min-w-0">
                   <span class="text-sm font-medium text-gray-700">{{ $t('keyMonitor.remoteModule') }}</span>
-                  <select
-                    ref="tmsModuleSelectRef"
+                  <CustomSelect
                     v-model="selectedTmsModuleValue"
-                    class="form-select"
+                    :options="tmsModuleOptions"
                     :disabled="!selectedTmsProjectId || tmsLoadingModules || tmsLoadingTestcases"
+                    :placeholder="$t('keyMonitor.selectRemoteModule')"
                     @change="handleTmsModuleChange"
-                  >
-                    <option value="">{{ $t('keyMonitor.selectRemoteModule') }}</option>
-                    <option v-for="moduleItem in filteredTmsModules" :key="moduleItem.value" :value="moduleItem.value">
-                      {{ formatTmsModuleLabel(moduleItem) }}
-                    </option>
-                  </select>
+                  />
                 </label>
 
                 <label class="grid gap-1 min-w-0">
                   <span class="text-sm font-medium text-gray-700">{{ $t('keyMonitor.remoteCaseSize') }}</span>
-                  <select
-                    v-model.number="tmsPageSize"
-                    class="form-select"
+                  <CustomSelect
+                    v-model="tmsPageSize"
+                    :options="tmsPageSizeOptions"
                     @change="handleTmsPageSizeChange"
-                  >
-                    <option :value="10">10</option>
-                    <option :value="20">20</option>
-                    <option :value="50">50</option>
-                    <option :value="100">100</option>
-                  </select>
+                  />
                 </label>
 
                 <label class="grid gap-1 min-w-0">
                   <span class="text-sm font-medium text-gray-700">{{ $t('keyMonitor.remoteCaseNumber') }}</span>
-                  <select
-                    ref="tmsCaseNumberSelectRef"
+                  <CustomSelect
                     v-model="selectedTmsCaseNumber"
-                    class="form-select"
+                    :options="tmsCaseNumberOptions"
                     :disabled="tmsLoadingTestcases || paginatedFilteredTmsCaseNumbers.length === 0"
-                  >
-                    <option value="">{{ $t('keyMonitor.selectRemoteCaseNumber') }}</option>
-                    <option v-for="caseNumber in paginatedFilteredTmsCaseNumbers" :key="caseNumber" :value="caseNumber">
-                      {{ caseNumber }}
-                    </option>
-                  </select>
+                    :placeholder="$t('keyMonitor.selectRemoteCaseNumber')"
+                  />
                   <span
                     v-if="tmsCaseNumberSubmittedKeyword && filteredTmsCaseNumbers.length === 0 && filteredTmsModules.length === 0"
                     class="text-xs text-rose-600"
@@ -178,7 +159,7 @@
 
             </div>
 
-            <div class="rounded-lg border border-slate-200 bg-white p-3 lg:min-h-[180px] lg:max-h-[260px] lg:overflow-y-auto">
+            <div class="rounded-lg border border-slate-200 bg-white p-3 h-full lg:overflow-y-auto">
               <div class="flex items-center justify-between gap-2 mb-2">
                 <h4 class="text-sm font-semibold text-slate-900">
                   {{ $t('keyMonitor.testcaseDetailTitle') }}
@@ -307,17 +288,15 @@
         </div>
         <div class="key-monitor-main-body">
           <div class="key-monitor-main-content">
-            <div class="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
               <div class="grid gap-3">
-                <select
+                <CustomSelect
                   v-model="selectedExcelFile"
-                  class="form-select"
+                  :options="excelFileOptions"
                   :disabled="excelLoadingFiles || excelUploading"
+                  :placeholder="$t('keyMonitor.selectExcel')"
                   @change="handleExcelFileChange"
-                >
-                  <option value="">{{ $t('keyMonitor.selectExcel') }}</option>
-                  <option v-for="file in excelFiles" :key="file" :value="file">{{ file }}</option>
-                </select>
+                />
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
                 <button
@@ -485,8 +464,9 @@
         </div>
 
         <aside class="key-monitor-aside">
+          <div class="rounded-xl border border-slate-200 bg-white p-5">
           <div class="device-preview-panel device-preview-panel--fill">
-              <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+              <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                 <div>
                   <div class="text-sm font-semibold text-slate-900">{{ $t('keyMonitor.devicePreviewTitle') }}</div>
                   <div class="text-xs text-slate-500">{{ devicePreviewIdentityLabel }}</div>
@@ -590,36 +570,26 @@
                 </div>
               </div>
 
-              <div class="mb-3 flex flex-wrap gap-3 items-end">
+              <div class="mb-3 flex flex-wrap gap-3 items-start">
                 <label class="grid gap-1 min-w-[180px] flex-1 max-w-xs">
                   <span class="text-xs font-medium text-slate-600">{{ $t('keyMonitor.devicePreviewSourceLabel') }}</span>
-                  <select v-model="devicePreviewSource" class="form-select text-sm">
-                    <option :value="DEVICE_PREVIEW_SOURCE_ADB">{{ $t('keyMonitor.devicePreviewSourceAdb') }}</option>
-                    <option :value="DEVICE_PREVIEW_SOURCE_CAPTURE_CARD">{{ $t('keyMonitor.devicePreviewSourceCaptureCard') }}</option>
-                  </select>
+                  <CustomSelect
+                    v-model="devicePreviewSource"
+                    :options="devicePreviewSourceOptions"
+                  />
                 </label>
 
                 <template v-if="devicePreviewUsesCaptureCard">
                   <label class="grid gap-1 min-w-[200px] flex-1 max-w-sm">
                     <span class="text-xs font-medium text-slate-600">{{ $t('keyMonitor.captureCardDeviceLabel') }}</span>
                     <div class="flex gap-2">
-                      <select
-                        :value="captureCardActiveDeviceId"
-                        class="form-select text-sm flex-1 min-w-0"
+                      <CustomSelect
+                        :modelValue="captureCardActiveDeviceId"
+                        :options="captureCardDeviceOptions"
                         :disabled="captureCardListLoading || captureCardSwitching"
+                        class="flex-1 min-w-0"
                         @change="onCaptureCardDeviceSelectChange"
-                      >
-                        <option v-if="captureCardDevicesList.length === 0" :value="captureCardActiveDeviceId">
-                          {{ captureCardListLoading ? $t('keyMonitor.captureCardScanning') : $t('keyMonitor.captureCardNoDevices') }}
-                        </option>
-                        <option
-                          v-for="dev in captureCardDevicesList"
-                          :key="dev.device_id"
-                          :value="dev.device_id"
-                        >
-                          {{ dev.label }}
-                        </option>
-                      </select>
+                      />
                       <button
                         type="button"
                         class="btn btn-secondary btn-sm whitespace-nowrap"
@@ -638,7 +608,6 @@
                       </button>
                     </div>
                     <span v-if="captureCardError" class="text-[11px] text-rose-600">{{ captureCardError }}</span>
-                    <span v-else class="text-[11px] text-slate-500">{{ $t('keyMonitor.captureCardHint') }}</span>
                   </label>
                 </template>
               </div>
@@ -704,11 +673,12 @@
                 {{ devicePreviewError }}
               </div>
           </div>
+          </div>
 
           <!-- 纠错规则方案模块 -->
-          <div v-if="!keyMonitorActive && !isStarting" class="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <div v-if="!keyMonitorActive && !isStarting" class="mt-4 rounded-xl border border-slate-200 bg-white">
             <div
-              class="flex items-center justify-between p-3 cursor-pointer hover:bg-yellow-100 transition-colors"
+              class="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors"
               @click="schemePanelExpanded = !schemePanelExpanded"
             >
               <div class="text-sm font-semibold text-slate-700">
@@ -727,7 +697,7 @@
               </div>
             </div>
 
-            <div v-if="schemePanelExpanded" class="px-3 pb-3 border-t border-yellow-200">
+            <div v-if="schemePanelExpanded" class="px-4 pb-4 border-t border-slate-200">
               <div class="key-monitor-scheme-bar mt-3">
                 <div class="key-monitor-scheme-tabs-wrap">
                   <div class="key-monitor-scheme-tabs">
@@ -986,8 +956,10 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CustomSelect from '../components/CustomSelect.vue'
 import UploadExcelConfirmModal from '../components/UploadExcelConfirmModal.vue'
 import { useUploadExcelConfirm } from '../composables/useUploadExcelConfirm.js'
+import { showAlert as alert } from '../stores/dialogStore'
 
 const DEVICE_STATUS_EVENT = 'checkpilot:device-updated'
 const PLATFORM_AUTH_EVENT = 'checkpilot:platform-auth-updated'
@@ -997,6 +969,7 @@ const DEVICE_PREVIEW_SOURCE_STORAGE_KEY = 'checkpilot:device-preview-source'
 const KEY_MONITOR_TTS_MODE_STORAGE_KEY = 'checkpilot:key-monitor-tts-mode'
 const DEVICE_PREVIEW_SOURCE_ADB = 'adb'
 const DEVICE_PREVIEW_SOURCE_CAPTURE_CARD = 'capture_card'
+const DEVICE_PREVIEW_SOURCE_SCRCPY = 'scrcpy'
 const DEVICE_PREVIEW_MODE_SNAPSHOT = 'snapshot'
 const DEVICE_PREVIEW_MODE_STREAM = 'stream'
 const { t } = useI18n({ useScope: 'global' })
@@ -1006,7 +979,7 @@ const VALID_MONITOR_KEYS = new Set([
   'DIGITAL0', 'DIGITAL1', 'DIGITAL2', 'DIGITAL3', 'DIGITAL4', 'DIGITAL5', 'DIGITAL6', 'DIGITAL7', 'DIGITAL8', 'DIGITAL9',
   'APPS', 'POWER', 'SOURCE', 'CHUP', 'CHDOWN', 'EXIT', 'LIBRARY', 'TV_AV', 'VOLUMEUP', 'VOLUMEDOWN',
   'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'PRIME_VII', 'ACTION3', 'ACTIONS', 'FILES', 'RED', 'GREEN', 'YELLOW', 'BLUE',
-  'INFORMATION', 'MUTE', 'DISCOVERY', 'ASSERT'
+  'INFORMATION', 'MUTE', 'DISCOVERY', 'ASSERT', 'NOTASSERT'
 ])
 const defaultValidMonitorKeys = Array.from(VALID_MONITOR_KEYS)
   .filter(key => !['PRIME_VII', 'ACTIONS'].includes(key))
@@ -1144,7 +1117,8 @@ const devicePreviewCapturedLabel = computed(() => {
   return new Date(devicePreviewCapturedAt.value).toLocaleString()
 })
 const devicePreviewUsesCaptureCard = computed(() => devicePreviewSource.value === DEVICE_PREVIEW_SOURCE_CAPTURE_CARD)
-const canLoadDevicePreview = computed(() => devicePreviewUsesCaptureCard.value || Boolean(selectedDevice.value))
+const devicePreviewUsesScrcpy = computed(() => devicePreviewSource.value === DEVICE_PREVIEW_SOURCE_SCRCPY)
+const canLoadDevicePreview = computed(() => devicePreviewUsesCaptureCard.value || devicePreviewUsesScrcpy.value || Boolean(selectedDevice.value))
 const devicePreviewIdentityLabel = computed(() => {
   if (devicePreviewLabel.value) {
     return devicePreviewLabel.value
@@ -1152,10 +1126,13 @@ const devicePreviewIdentityLabel = computed(() => {
   if (devicePreviewUsesCaptureCard.value) {
     return t('keyMonitor.devicePreviewCaptureCardLabel')
   }
+  if (devicePreviewUsesScrcpy.value) {
+    return `scrcpy · ${selectedDevice.value || ''}`
+  }
   return selectedDevice.value || ''
 })
 const devicePreviewInteractionLocked = computed(() => {
-  if (devicePreviewUsesCaptureCard.value) {
+  if (devicePreviewUsesCaptureCard.value || devicePreviewUsesScrcpy.value) {
     return devicePreviewSelectionActive.value || Boolean(devicePreviewSelectionCrop.value)
   }
 
@@ -1243,6 +1220,62 @@ const schemeModalSubmitDisabled = computed(() => {
     return false
   }
   return !schemeModalInput.value.trim()
+})
+
+// Select options computed properties
+const tmsProjectOptions = computed(() => [
+  { value: '', label: t('keyMonitor.selectRemoteProject') },
+  ...tmsProjects.value.map((project) => ({
+    value: String(project.id),
+    label: project.name,
+  })),
+])
+
+const tmsModuleOptions = computed(() => [
+  { value: '', label: t('keyMonitor.selectRemoteModule') },
+  ...filteredTmsModules.value.map((moduleItem) => ({
+    value: moduleItem.value,
+    label: formatTmsModuleLabel(moduleItem),
+  })),
+])
+
+const tmsPageSizeOptions = computed(() => [
+  { value: 10, label: '10' },
+  { value: 20, label: '20' },
+  { value: 50, label: '50' },
+  { value: 100, label: '100' },
+])
+
+const tmsCaseNumberOptions = computed(() => [
+  { value: '', label: t('keyMonitor.selectRemoteCaseNumber') },
+  ...paginatedFilteredTmsCaseNumbers.value.map((caseNumber) => ({
+    value: caseNumber,
+    label: caseNumber,
+  })),
+])
+
+const excelFileOptions = computed(() => [
+  { value: '', label: t('keyMonitor.selectExcel') },
+  ...excelFiles.value.map((file) => ({
+    value: file,
+    label: file,
+  })),
+])
+
+const devicePreviewSourceOptions = computed(() => [
+  { value: DEVICE_PREVIEW_SOURCE_ADB, label: t('keyMonitor.devicePreviewSourceAdb') },
+  { value: DEVICE_PREVIEW_SOURCE_CAPTURE_CARD, label: t('keyMonitor.devicePreviewSourceCaptureCard') },
+  { value: DEVICE_PREVIEW_SOURCE_SCRCPY, label: t('keyMonitor.devicePreviewSourceScrcpy') },
+])
+
+const captureCardDeviceOptions = computed(() => {
+  if (captureCardDevicesList.value.length === 0) {
+    return [{ value: captureCardActiveDeviceId.value, label: captureCardListLoading.value ? t('keyMonitor.captureCardScanning') : t('keyMonitor.captureCardNoDevices') }]
+  }
+  return captureCardDevicesList.value.map((dev) => ({
+    value: dev.device_id,
+    label: dev.label,
+  }))
 })
 
 const pendingImportFileName = computed(() => pendingImportFile.value?.name || '')
@@ -1370,6 +1403,25 @@ const startCaptureCardLivePreview = () => {
   devicePreviewUrl.value = buildCaptureCardStreamUrl()
 }
 
+const buildScrcpyStreamUrl = () => {
+  return `/api/devices/preview/stream?source=${encodeURIComponent(DEVICE_PREVIEW_SOURCE_SCRCPY)}&stream=${devicePreviewStreamVersion.value}`
+}
+
+const startScrcpyLivePreview = () => {
+  if (!devicePreviewUsesScrcpy.value || !canLoadDevicePreview.value || devicePreviewInteractionLocked.value) {
+    return
+  }
+
+  devicePreviewStreamVersion.value += 1
+  devicePreviewMode.value = DEVICE_PREVIEW_MODE_STREAM
+  devicePreviewLoading.value = true
+  devicePreviewCapturedAt.value = 0
+  devicePreviewLabel.value = `scrcpy · ${selectedDevice.value || ''}`
+  devicePreviewError.value = ''
+  devicePreviewSaveMessage.value = ''
+  devicePreviewUrl.value = buildScrcpyStreamUrl()
+}
+
 const stopDevicePreviewPolling = () => {
   if (devicePreviewTimer) {
     clearInterval(devicePreviewTimer)
@@ -1385,6 +1437,11 @@ const startDevicePreviewPolling = () => {
 
   if (devicePreviewUsesCaptureCard.value) {
     startCaptureCardLivePreview()
+    return
+  }
+
+  if (devicePreviewUsesScrcpy.value) {
+    startScrcpyLivePreview()
     return
   }
 
@@ -1415,11 +1472,14 @@ const fetchDevicePreview = async ({ silent = false } = {}) => {
       throw new Error(data.detail || t('keyMonitor.alerts.loadDevicePreviewFailed'))
     }
 
-    if (typeof data.screenshot_url !== 'string' || !data.screenshot_url) {
+    // scrcpy 返回 jpeg_base64 而非 screenshot_url
+    if (data.jpeg_base64) {
+      devicePreviewUrl.value = `data:image/jpeg;base64,${data.jpeg_base64}`
+    } else if (typeof data.screenshot_url === 'string' && data.screenshot_url) {
+      devicePreviewUrl.value = data.screenshot_url
+    } else {
       throw new Error(t('keyMonitor.alerts.loadDevicePreviewFailed'))
     }
-
-    devicePreviewUrl.value = data.screenshot_url
     devicePreviewCapturedAt.value = Number(data.captured_at) || 0
     devicePreviewLabel.value = typeof data.preview_label === 'string' ? data.preview_label : ''
     if (!devicePreviewUsesCaptureCard.value) {
@@ -1444,6 +1504,11 @@ const handleDevicePreviewRefresh = async () => {
 
   if (devicePreviewUsesCaptureCard.value && !devicePreviewInteractionLocked.value) {
     startCaptureCardLivePreview()
+    return
+  }
+
+  if (devicePreviewUsesScrcpy.value && !devicePreviewInteractionLocked.value) {
+    startScrcpyLivePreview()
     return
   }
 
@@ -2166,7 +2231,8 @@ watch(selectedDevice, (device) => {
 })
 
 watch(devicePreviewSource, (source) => {
-  const normalized = source === DEVICE_PREVIEW_SOURCE_CAPTURE_CARD ? DEVICE_PREVIEW_SOURCE_CAPTURE_CARD : DEVICE_PREVIEW_SOURCE_ADB
+  const validSources = [DEVICE_PREVIEW_SOURCE_CAPTURE_CARD, DEVICE_PREVIEW_SOURCE_SCRCPY]
+  const normalized = validSources.includes(source) ? source : DEVICE_PREVIEW_SOURCE_ADB
   devicePreviewSource.value = normalized
 
   try {
@@ -2217,8 +2283,8 @@ const loadCaptureCardDevices = async () => {
   }
 }
 
-const onCaptureCardDeviceSelectChange = async (event) => {
-  const next = Number(event?.target?.value)
+const onCaptureCardDeviceSelectChange = async (value) => {
+  const next = Number(value)
   if (!Number.isFinite(next) || next === captureCardActiveDeviceId.value) {
     return
   }
@@ -2474,8 +2540,9 @@ onMounted(async () => {
   try {
     devicePreviewSaveDir.value = window.localStorage.getItem(DEVICE_PREVIEW_SAVE_DIR_STORAGE_KEY) || ''
     const storedPreviewSource = window.localStorage.getItem(DEVICE_PREVIEW_SOURCE_STORAGE_KEY) || ''
-    devicePreviewSource.value = storedPreviewSource === DEVICE_PREVIEW_SOURCE_CAPTURE_CARD
-      ? DEVICE_PREVIEW_SOURCE_CAPTURE_CARD
+    const validStoredSources = [DEVICE_PREVIEW_SOURCE_CAPTURE_CARD, DEVICE_PREVIEW_SOURCE_SCRCPY]
+    devicePreviewSource.value = validStoredSources.includes(storedPreviewSource)
+      ? storedPreviewSource
       : DEVICE_PREVIEW_SOURCE_ADB
     ttsModeEnabled.value = window.localStorage.getItem(KEY_MONITOR_TTS_MODE_STORAGE_KEY) === '1'
   } catch {}
@@ -2919,7 +2986,7 @@ const clearMonitorContent = async () => {
 
 const copySequence = async () => {
   if (keyMonitorActive.value || isStarting.value) {
-    alert(t('keyMonitor.alerts.copyBlocked'))
+    await alert(t('keyMonitor.alerts.copyBlocked'))
     return
   }
   if (!workingSequence.value) return
@@ -2935,7 +3002,7 @@ const copySequence = async () => {
       document.execCommand('copy')
       document.body.removeChild(el)
     }
-    alert(t('keyMonitor.alerts.copySuccess'))
+    await alert(t('keyMonitor.alerts.copySuccess'))
   } catch {}
 }
 
@@ -3037,11 +3104,11 @@ const promptDirectAssertFormat = (defaultFormat = 'Assert/1/1') => {
   })
 }
 
-const confirmDirectAssertModal = () => {
+const confirmDirectAssertModal = async () => {
   const format = directAssertModalFormat.value.trim()
   // 用户输入为空则显示警告，不允许为空
   if (!format) {
-    alert(t('keyMonitor.directAssertModal.emptyWarning'))
+    await alert(t('keyMonitor.directAssertModal.emptyWarning'))
     return
   }
   directAssertModalVisible.value = false
@@ -3083,7 +3150,7 @@ const saveSequenceToExcel = async () => {
       throw new Error(t('keyMonitor.alerts.noWritableSequence'))
     }
 
-    // 根据 Assert 模式决定写入逻辑
+    // 根据 Assert/TTS 模式决定写入逻辑
     const currentCaseKey = effectiveCaseNumber.value || ''
     let assertFormat = undefined
 
@@ -3107,8 +3174,12 @@ const saveSequenceToExcel = async () => {
       // 更新缓存
       const previousCount = caseWriteCounts.value[currentCaseKey] || 0
       caseWriteCounts.value = { ...caseWriteCounts.value, [currentCaseKey]: previousCount + 1 }
+    } else if (ttsModeEnabled.value) {
+      // TTS 模式激活：允许多次写入同一 caseID（每次自动插入 TTS 标记）
+      const previousCount = caseWriteCounts.value[currentCaseKey] || 0
+      caseWriteCounts.value = { ...caseWriteCounts.value, [currentCaseKey]: previousCount + 1 }
     } else {
-      // Assert 模式未激活：不允许重复写入同一 caseID
+      // Assert/TTS 模式均未激活：不允许重复写入同一 caseID
       const previousCount = caseWriteCounts.value[currentCaseKey] || 0
       if (previousCount >= 1) {
         throw new Error(t('keyMonitor.alerts.caseAlreadyWritten'))
@@ -3685,21 +3756,30 @@ const onSchemeImportFileChange = async (event) => {
 function compressAdjacent(seq) {
   const parts = seq.split(',').map(s => s.trim()).filter(Boolean)
   const out = []
+  // 随机次数段既不作为合并源，也不作为后续数字段的合并目标
+  let lastIsRandom = false
   for (const part of parts) {
     const segs = part.split('/')
     if (segs.length < 3) {
       out.push(part)
+      lastIsRandom = false
       continue
     }
     const key = segs[0]
+    if (/^[xX](?::\d+)?$/.test((segs[1] || '').trim())) {
+      out.push(part)
+      lastIsRandom = true
+      continue
+    }
     const cnt = parseInt(segs[1], 10) || 1
     const delay = segs[2]
     if (delay === '*' || isNaN(cnt)) {
       out.push(`${key}/${cnt}/${delay}`)
+      lastIsRandom = false
       continue
     }
     const last = out.length > 0 ? out[out.length - 1] : null
-    if (last) {
+    if (last && !lastIsRandom) {
       const lastSegs = last.split('/')
       if (lastSegs.length >= 3 && lastSegs[0] === key && lastSegs[2] === delay) {
         const lastCnt = parseInt(lastSegs[1], 10) || 1
@@ -3708,6 +3788,7 @@ function compressAdjacent(seq) {
       }
     }
     out.push(`${key}/${cnt}/${delay}`)
+    lastIsRandom = false
   }
   return out.join(',')
 }
@@ -3824,7 +3905,7 @@ function compressAdjacent(seq) {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 24px 28px;
+  padding: 28px 32px;
   border: none;
   border-radius: 0;
   box-shadow: none;
@@ -3849,13 +3930,16 @@ function compressAdjacent(seq) {
 .key-monitor-layout {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
   align-items: stretch;
 }
 
 .key-monitor-main {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .key-monitor-main-body {
@@ -3863,12 +3947,17 @@ function compressAdjacent(seq) {
 }
 
 .key-monitor-main-content {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 /* sticky 的 aside：在 lg 及以上让设备画面"贴在视口顶部"持续可见 */
 .key-monitor-aside {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .device-preview-panel--fill {
@@ -3899,6 +3988,7 @@ function compressAdjacent(seq) {
     max-height: calc(100vh - 110px);
     display: flex;
     flex-direction: column;
+    gap: 16px;
     /* 加了截图队列等控件后，aside 内总高度可能超过视口，让自身可滚动 */
     overflow-y: auto;
   }

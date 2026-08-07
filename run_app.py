@@ -8,7 +8,12 @@ import webbrowser
 import uvicorn
 from datetime import datetime
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+# 打包（frozen）后 __file__ 指向 PyInstaller 解压临时目录 _MEIPASS，日志必须写到
+# exe 所在目录，而不是临时目录（退出即被清空）。开发模式下仍用项目根目录。
+if getattr(sys, "frozen", False):
+  ROOT_DIR = os.path.dirname(sys.executable)
+else:
+  ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
 if ROOT_DIR not in sys.path:
   sys.path.insert(0, ROOT_DIR)
@@ -18,7 +23,7 @@ if BACKEND_DIR not in sys.path:
 # ---- 日志文件配置（在导入业务模块之前完成，确保所有 logger 都能写入文件） ----
 LOG_DIR = os.path.join(ROOT_DIR, "log")
 os.makedirs(LOG_DIR, exist_ok=True)
-_log_filename = datetime.now().strftime("ADBControl_%Y%m%d_%H%M%S.log")
+_log_filename = datetime.now().strftime("AutoDeck_%Y%m%d_%H%M%S.log")
 _log_filepath = os.path.join(LOG_DIR, _log_filename)
 
 _file_handler = logging.FileHandler(_log_filepath, encoding="utf-8")
@@ -34,6 +39,19 @@ logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handle
 # uvicorn 的 access log 也写入同一文件
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+# 过滤 Windows Proactor 事件循环的连接重置噪音：播放/拖动录屏视频时浏览器
+# 用 Range 分块拉流（206），进度切换或关闭播放器会让连接被强制关闭（WinError 10054），
+# asyncio 的 _call_connection_lost 回调会打 ERROR 刷屏，实际不影响运行。
+class _AsyncioConnectionResetFilter(logging.Filter):
+    def filter(self, record):
+        if record.name == 'asyncio':
+            message = record.getMessage()
+            if '_call_connection_lost' in message or 'WinError 10054' in message or 'ConnectionResetError' in message:
+                return False
+        return True
+
+logging.getLogger('asyncio').addFilter(_AsyncioConnectionResetFilter())
 
 from backend.main import app as fastapi_app
 from backend.app.config import settings
@@ -70,7 +88,7 @@ def main():
     if sys.platform.startswith("win"):
       try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(None, f"ADBControl is running.\nOpen: http://localhost:{port}", "ADBControl", 0)
+        ctypes.windll.user32.MessageBoxW(None, f"AutoDeck 自动测控台 is running.\nOpen: http://localhost:{port}", "AutoDeck", 0)
       except:
         pass
     while not server.should_exit:
@@ -85,7 +103,7 @@ def main():
     if sys.platform.startswith("win"):
       try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(None, msg, "ADBControl", 0)
+        ctypes.windll.user32.MessageBoxW(None, msg, "AutoDeck", 0)
       except:
         pass
     time.sleep(3)

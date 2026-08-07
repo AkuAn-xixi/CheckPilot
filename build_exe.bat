@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title ADBControl Build
+title AutoDeck Build
 
 
 cd /d "%~dp0"
@@ -106,9 +106,9 @@ if exist "backend\requirements.txt" (
 )
 
 echo [4/4] Building EXE
-if exist "dist\ADBControl.exe" (
-  echo - Stopping running ADBControl.exe processes that would lock dist\ADBControl.exe
-  taskkill /f /im ADBControl.exe >nul 2>nul
+if exist "dist\AutoDeck.exe" (
+  echo - Stopping running AutoDeck.exe processes that would lock dist\AutoDeck.exe
+  taskkill /f /im AutoDeck.exe >nul 2>nul
 )
 if exist "dist" (
   echo - Cleaning old dist directory
@@ -133,13 +133,13 @@ if not exist "frontend\dist\index.html" (
   exit /b 1
 )
 
-if not exist "ADBControl.spec" (
-  echo ADBControl.spec not found
+if not exist "AutoDeck.spec" (
+  echo AutoDeck.spec not found
   pause
   exit /b 1
 )
 
-"%PYTHON_CMD%" -m PyInstaller --clean --noconfirm ADBControl.spec
+"%PYTHON_CMD%" -m PyInstaller --clean --noconfirm AutoDeck.spec
 if errorlevel 1 (
   echo Build failed
   pause
@@ -148,7 +148,7 @@ if errorlevel 1 (
 
 echo.
 echo Build completed:
-echo - Executable: "%~dp0dist\ADBControl.exe"
+echo - Executable: "%~dp0dist\AutoDeck.exe"
 echo - Visit after start: http://localhost:8000/
 echo.
 pause
@@ -173,6 +173,6 @@ for /l %%I in (1,1,5) do (
 )
 echo Failed to clean "%TARGET_DIR%". Files in this directory are still in use.
 if /i "%TARGET_DIR%"=="dist" (
-  echo Please close any running ADBControl.exe window and try again.
+  echo Please close any running AutoDeck.exe window and try again.
 )
 exit /b 1

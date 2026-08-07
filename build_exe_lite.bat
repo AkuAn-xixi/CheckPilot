@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title ADBControl Lite Build
+title AutoDeck Lite Build
 
 
 cd /d "%~dp0"
@@ -29,7 +29,7 @@ if exist "%~dp0.venv\Scripts\python.exe" (
 )
 
 echo ============================================================
-echo           ADBControl Lite Build (精简版)
+echo           AutoDeck Lite Build (精简版)
 echo ============================================================
 echo.
 echo [INFO] 此版本不包含以下大型依赖：
@@ -126,9 +126,9 @@ if exist "backend\requirements.txt" (
 )
 
 echo [4/4] Building EXE (Lite)
-if exist "dist\ADBControl_lite.exe" (
-  echo - Stopping running ADBControl_lite.exe processes that would lock dist\ADBControl_lite.exe
-  taskkill /f /im ADBControl_lite.exe >nul 2>nul
+if exist "dist\AutoDeck_lite.exe" (
+  echo - Stopping running AutoDeck_lite.exe processes that would lock dist\AutoDeck_lite.exe
+  taskkill /f /im AutoDeck_lite.exe >nul 2>nul
 )
 if exist "dist" (
   echo - Cleaning old dist directory
@@ -153,13 +153,13 @@ if not exist "frontend\dist\index.html" (
   exit /b 1
 )
 
-if not exist "ADBControl_lite.spec" (
-  echo ADBControl_lite.spec not found
+if not exist "AutoDeck_lite.spec" (
+  echo AutoDeck_lite.spec not found
   pause
   exit /b 1
 )
 
-"%PYTHON_CMD%" -m PyInstaller --clean --noconfirm ADBControl_lite.spec
+"%PYTHON_CMD%" -m PyInstaller --clean --noconfirm AutoDeck_lite.spec
 if errorlevel 1 (
   echo Build failed
   pause
@@ -170,7 +170,7 @@ echo.
 echo ============================================================
 echo           Build completed (精简版)
 echo ============================================================
-echo - Executable: "%~dp0dist\ADBControl_lite.exe"
+echo - Executable: "%~dp0dist\AutoDeck_lite.exe"
 echo - Visit after start: http://localhost:8000/
 echo.
 echo [INFO] 精简版功能：
@@ -207,6 +207,6 @@ for /l %%I in (1,1,5) do (
 )
 echo Failed to clean "%TARGET_DIR%". Files in this directory are still in use.
 if /i "%TARGET_DIR%"=="dist" (
-  echo Please close any running ADBControl_lite.exe window and try again.
+  echo Please close any running AutoDeck_lite.exe window and try again.
 )
 exit /b 1

@@ -1,11 +1,14 @@
 """运行时状态访问工具。"""
 import json
+import logging
 import sys
 from types import ModuleType
 from typing import Any, List, Optional
 
 from .config import settings
 from .utils.adb_controller import ADBController
+
+logger = logging.getLogger(__name__)
 
 
 RUNTIME_STATE_FILE = settings.WORKING_DIR / "runtime_state.json"
@@ -161,9 +164,12 @@ def get_current_device() -> Optional[str]:
     """
 
     module = _get_main_module()
-    if module is not None and hasattr(module, "current_device"):
-        runtime_state.current_device = module.current_device
+    module_device = getattr(module, "current_device", None) if module is not None else None
+    if module_device:
+        runtime_state.current_device = module_device
     else:
+        # 模块全局 current_device 为空（可能被某些路径重置）时，回退到磁盘持久化值，
+        # 避免把用户已选设备误清空。
         _restore_current_device_from_disk()
 
     current_device = runtime_state.current_device
@@ -206,6 +212,11 @@ def prune_current_device_if_offline(available_devices: List[str]) -> Optional[st
         _persist_current_device(current_device)
         return current_device
 
+    logger.warning(
+        "[设备] 当前设备 %s 不在在线设备列表 %s 中，判定为掉线并清空选择",
+        current_device,
+        available_devices,
+    )
     runtime_state.current_device = None
     controller = get_controller()
     controller.device_serial = None

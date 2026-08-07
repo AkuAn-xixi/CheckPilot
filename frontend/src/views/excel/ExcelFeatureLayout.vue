@@ -15,6 +15,8 @@
           :key="feature.to"
           type="button"
           class="feature-card directory-card"
+          :class="{ 'feature-card--disabled': feature.disabled }"
+          :disabled="feature.disabled"
           @click="openFeature(feature.to)"
         >
           <div class="flex items-start justify-between gap-4">
@@ -33,41 +35,64 @@
       </div>
     </section>
 
-    <template v-else>
-      <router-view />
-    </template>
+    <div v-if="showNoDeviceModal" class="modal-backdrop" @click.self="dismissNoDeviceModal">
+      <div class="modal-box">
+        <div class="modal-icon">⚠️</div>
+        <h4 class="modal-title">{{ $t('excelDirectory.alerts.noDeviceTitle') }}</h4>
+        <p class="modal-body">{{ $t('excelDirectory.alerts.noDeviceBody') }}</p>
+        <div class="modal-footer">
+          <button class="btn btn-primary btn-sm" @click="dismissNoDeviceModal">{{ $t('excelDirectory.alerts.noDeviceConfirm') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { executionState, isExecutionRunning } from '../../stores/executionStore'
+
+// 命名组件，供 App.vue 的 <keep-alive include="ExcelFeatureLayout"> 缓存匹配
+defineOptions({ name: 'ExcelFeatureLayout' })
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n({ useScope: 'global' })
 
-const features = computed(() => [
-  {
-    index: '01',
-    tag: 'Visual Check',
-    label: t('excelDirectory.visualCheck.label'),
-    description: t('excelDirectory.visualCheck.description'),
-    status: t('excelDirectory.visualCheck.status'),
-    to: '/excel/cases'
-  },
-  {
-    index: '02',
-    tag: 'Speech Validation',
-    label: t('excelDirectory.speechValidation.label'),
-    description: t('excelDirectory.speechValidation.description'),
-    status: t('excelDirectory.speechValidation.status'),
-    to: '/excel/asr'
-  }
-])
+const features = computed(() => {
+  const blockingType = isExecutionRunning.value ? executionState.activeType : null
+  const raw = [
+    {
+      moduleType: 'image',
+      index: '01',
+      tag: 'Visual Check',
+      label: t('excelDirectory.visualCheck.label'),
+      description: t('excelDirectory.visualCheck.description'),
+      status: t('excelDirectory.visualCheck.status'),
+      to: '/excel/cases'
+    },
+    {
+      moduleType: 'asr',
+      index: '02',
+      tag: 'Speech Validation',
+      label: t('excelDirectory.speechValidation.label'),
+      description: t('excelDirectory.speechValidation.description'),
+      status: t('excelDirectory.speechValidation.status'),
+      to: '/excel/asr'
+    }
+  ]
+  return raw.map((item) => ({
+    ...item,
+    disabled: blockingType !== null && blockingType !== item.moduleType
+  }))
+})
 
 const isDirectory = computed(() => route.path === '/excel')
+
+const showNoDeviceModal = ref(false)
+const pendingRoute = ref('')
 
 const loadCurrentDevice = async () => {
   try {
@@ -85,13 +110,28 @@ const loadCurrentDevice = async () => {
 }
 
 const openFeature = async (to) => {
+  const feature = features.value.find((item) => item.to === to)
+  if (feature?.disabled) {
+    return
+  }
+
   const currentDevice = await loadCurrentDevice()
   if (!currentDevice) {
-    alert(t('excelDirectory.alerts.selectDeviceFirst'))
+    pendingRoute.value = to
+    showNoDeviceModal.value = true
     return
   }
 
   await router.push(to)
+}
+
+const dismissNoDeviceModal = async () => {
+  const to = pendingRoute.value
+  showNoDeviceModal.value = false
+  pendingRoute.value = ''
+  if (to) {
+    await router.push(to)
+  }
 }
 </script>
 
@@ -164,6 +204,12 @@ const openFeature = async (to) => {
   background: linear-gradient(180deg, rgba(240, 249, 255, 0.96), rgba(255, 255, 255, 0.9));
 }
 
+.feature-card--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
 .feature-card:focus-visible {
   outline: 2px solid rgba(14, 165, 233, 0.35);
   outline-offset: 3px;
@@ -188,4 +234,28 @@ const openFeature = async (to) => {
     grid-template-columns: 1fr;
   }
 }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px 32px;
+  min-width: 320px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  text-align: center;
+}
+.modal-icon { font-size: 2rem; margin-bottom: 8px; }
+.modal-title { font-size: 1rem; font-weight: 700; margin: 0 0 8px; }
+.modal-body { font-size: 0.88rem; color: #4b5563; margin: 0; line-height: 1.6; }
+.modal-footer { display: flex; justify-content: center; margin-top: 20px; }
 </style>

@@ -3,7 +3,7 @@ import openpyxl
 from collections import Counter
 from typing import Dict, List, Any
 from ...FieldValidation import get_valid_keys as get_runtime_valid_keys
-from .adb_controller import get_keycode_map, NON_EXECUTABLE_KEYS
+from .adb_controller import get_keycode_map, get_custom_commands, NON_EXECUTABLE_KEYS, _parse_key_and_hold, is_valid_repeat_spec
 from .path_resolver import resolve_image_file
 
 VALID_KEYS = get_runtime_valid_keys()
@@ -24,7 +24,11 @@ class ExcelValidator:
         errors = []
         warnings = []
         valid_keys = {str(key).strip().upper() for key in get_runtime_valid_keys() if str(key).strip()}
-        keycode_keys = {str(key).strip().upper() for key in get_keycode_map().keys() if str(key).strip()}
+        keycode_keys = {
+            str(key).strip().upper()
+            for key in set(get_keycode_map().keys()) | set(get_custom_commands().keys())
+            if str(key).strip()
+        }
 
         c_values = []
         for i in range(2, sheet.max_row + 1):
@@ -56,8 +60,9 @@ class ExcelValidator:
                         errors.append(f"{col}{row} 命令 '{cmd}' 格式应为 KEY/COUNT/TIME")
                         continue
 
-                    key, count, time_val = parts
-                    key = key.upper()
+                    key, _hold_us = _parse_key_and_hold(parts[0])
+                    count = parts[1]
+                    time_val = parts[2]
                     # NON_EXECUTABLE_KEYS（如 ASSERT）作为系统级占位按键，
                     # 总是视作合法且不要求 keycode 映射
                     if key in NON_EXECUTABLE_KEYS:
@@ -67,8 +72,8 @@ class ExcelValidator:
                     elif key not in keycode_keys and key not in ASR_META_COMMANDS:
                         errors.append(f"{col}{row} 按键名称 '{key}' 缺少键值映射")
 
-                    if not count.isdigit() or int(count) <= 0:
-                        errors.append(f"{col}{row} 按键次数 '{count}' 必须为正整数")
+                    if not is_valid_repeat_spec(count):
+                        errors.append(f"{col}{row} 按键次数 '{count}' 必须为正整数或 X / X:N / X:(A:B)")
 
                     try:
                         float(time_val)
@@ -90,22 +95,29 @@ class ExcelValidator:
             # if not resolved_image_path.exists():
             #     warnings.append(f"I{row} 图片路径不存在: {image_path_value}")
 
+        import re
         for row in range(2, sheet.max_row + 1):
             cell_value = str(sheet.cell(row=row, column=10).value)
             if cell_value == "None" or not cell_value.strip():
                 continue
 
-            if not (cell_value.startswith("(") and cell_value.endswith(")") and "," in cell_value):
-                errors.append(f"J{row} 必须使用英文括号和逗号，格式应为(数字,数字)，当前值: {cell_value}")
+            pairs = re.findall(r'\([^()]+\)', cell_value.strip())
+            if not pairs:
+                errors.append(f"J{row} 必须使用英文括号，格式应为(数字,数字)或多个(数字,数字)，当前值: {cell_value}")
                 continue
 
-            try:
-                num_part = cell_value[1:-1]
-                num1, num2 = [num.strip() for num in num_part.split(",", 1)]
-                float(num1)
-                float(num2)
-            except ValueError:
-                errors.append(f"J{row} 包含非数字内容，当前值: {cell_value}")
+            for pair in pairs:
+                inner = pair[1:-1]
+                parts = [p.strip() for p in inner.split(",", 1)]
+                if len(parts) != 2:
+                    errors.append(f"J{row} 格式错误，应为(数字,数字)，当前值: {pair}")
+                    break
+                try:
+                    float(parts[0])
+                    float(parts[1])
+                except ValueError:
+                    errors.append(f"J{row} 包含非数字内容，当前值: {pair}")
+                    break
 
         return {
             "success": len(errors) == 0,

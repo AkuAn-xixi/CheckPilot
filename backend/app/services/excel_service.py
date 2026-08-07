@@ -7,7 +7,8 @@ import pandas as pd
 from typing import Dict, Any, List, Optional
 from openpyxl import load_workbook
 from ..config import settings
-from ..utils.adb_controller import ADBController
+from ..utils.adb_controller import ADBController, get_keycode_map, get_custom_commands, NON_EXECUTABLE_KEYS
+from ...FieldValidation import get_valid_keys as get_runtime_valid_keys
 from ..utils.validators import ExcelValidator
 from ..utils.path_resolver import list_excel_files, resolve_excel_file
 
@@ -585,6 +586,12 @@ class ExcelService:
         return None
 
     @classmethod
+    def _is_random_repeat(cls, repeat_token: str) -> bool:
+        """判断次数段是否为随机规格（``X`` 或 ``X:N``，大小写不敏感）。"""
+        token = repeat_token.strip().upper()
+        return token == "X" or (token.startswith("X:") and token[2:].isdigit())
+
+    @classmethod
     def _compress_adjacent_command_sequence(cls, sequence: Any) -> str:
         normalized_sequence = cls._normalize_command_sequence(sequence)
         if not normalized_sequence:
@@ -592,14 +599,22 @@ class ExcelService:
 
         parts = [part.strip() for part in normalized_sequence.split(',') if part.strip()]
         compressed_parts: List[str] = []
+        # 随机次数段既不作为合并源，也不作为后续数字段的合并目标
+        last_is_random = False
 
         for part in parts:
             segments = part.split('/')
             if len(segments) < 3:
                 compressed_parts.append(part)
+                last_is_random = False
                 continue
 
             key = segments[0]
+            if cls._is_random_repeat(segments[1]):
+                compressed_parts.append(part)
+                last_is_random = True
+                continue
+
             try:
                 count = int(segments[1])
             except (TypeError, ValueError):
@@ -610,10 +625,11 @@ class ExcelService:
             delay = segments[2]
             if delay == '*':
                 compressed_parts.append(f"{key}/{count}/{delay}")
+                last_is_random = False
                 continue
 
             last = compressed_parts[-1] if compressed_parts else None
-            if last:
+            if last and not last_is_random:
                 last_segments = last.split('/')
                 if len(last_segments) >= 3 and last_segments[0] == key and last_segments[2] == delay:
                     try:
@@ -627,6 +643,7 @@ class ExcelService:
                     continue
 
             compressed_parts.append(f"{key}/{count}/{delay}")
+            last_is_random = False
 
         return ','.join(compressed_parts)
 
@@ -1161,6 +1178,37 @@ class ExcelService:
         except Exception as e:
             raise Exception(f"写入 preScript 失败: {e}")
 
+    @staticmethod
+    def _check_invalid_keys(ori_step: str, pre_script: str) -> List[Dict[str, str]]:
+        """检查步骤文本中的按键名称是否合法，返回不合法按键列表。"""
+        valid_keys = {str(k).strip().upper() for k in get_runtime_valid_keys() if str(k).strip()}
+        keycode_keys = {
+            str(k).strip().upper()
+            for k in set(get_keycode_map().keys()) | set(get_custom_commands().keys())
+            if str(k).strip()
+        }
+        asr_meta = {"TTS"}
+
+        invalid = []
+        seen = set()
+        for text in [ori_step or '', pre_script or '']:
+            for cmd in text.split(','):
+                cmd = cmd.strip()
+                if not cmd:
+                    continue
+                parts = cmd.split('/')
+                if len(parts) < 1:
+                    continue
+                key = parts[0].strip().upper()
+                if not key or key in seen or key in NON_EXECUTABLE_KEYS or key in asr_meta:
+                    continue
+                seen.add(key)
+                if key not in valid_keys:
+                    invalid.append({"key": key, "reason": "invalid"})
+                elif key not in keycode_keys:
+                    invalid.append({"key": key, "reason": "missing_keycode"})
+        return invalid
+
     def update_case_fields(
         self,
         file_name: str,
@@ -1241,7 +1289,10 @@ class ExcelService:
             workbook.save(file_path)
             workbook.close()
 
-            return {
+            # 保存后校验按键合法性
+            invalid_keys = self._check_invalid_keys(ori_step, pre_script)
+
+            result = {
                 "status": "ok",
                 "file": file_name,
                 "excel_row": int(excel_row),
@@ -1249,7 +1300,135 @@ class ExcelService:
                 "columns": columns,
                 "preserved_format": True,
             }
+            if invalid_keys:
+                result["invalid_keys"] = invalid_keys
+            return result
         except Exception as e:
             raise Exception(f"更新用例字段失败: {e}")
+
+    def add_case(self, file_name: str, title: str = '') -> Dict[str, Any]:
+        """在 Excel 中新增一行用例。
+
+        写入一个占位命令 ``OK/1/1`` 到 preScript，保证该行被 ``read_excel_commands``
+        判定为有效用例（runOption=Y 且至少一条有效命令）而出现在前端列表里；
+        标题为空时自动生成 ``CASE-<时间戳>``。之后用户可再用编辑弹窗填写内容。
+        """
+        file_path = resolve_excel_file(file_name)
+        if not file_path.exists():
+            raise FileNotFoundError(f"文件不存在: {file_name}")
+
+        normalized_title = self._normalize_case_number(title)
+        if not normalized_title:
+            normalized_title = f"CASE-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        placeholder_prescript = 'OK/1/1'
+
+        try:
+            if not self._supports_cell_level_write(file_path):
+                df = pd.read_excel(file_path)
+                try:
+                    data_row_index = self._find_latest_blank_prescript_data_row_with_pandas(df)
+                except ValueError:
+                    data_row_index = len(df)
+                    df = df.reindex(range(data_row_index + 1))
+
+                if 'preScript' not in df.columns:
+                    df['preScript'] = None
+                df['preScript'] = df['preScript'].astype(object)
+                df.loc[data_row_index, 'preScript'] = placeholder_prescript
+
+                metadata = self._write_append_metadata_with_pandas(
+                    df, data_row_index, normalized_title, placeholder_prescript,
+                )
+                df.to_excel(file_path, index=False)
+
+                return {
+                    "status": "ok",
+                    "file": file_name,
+                    "title": normalized_title,
+                    "excel_row": data_row_index + 2,
+                    "data_row_index": data_row_index,
+                    "prescript": placeholder_prescript,
+                    "metadata": metadata,
+                }
+
+            workbook, worksheet = self._load_workbook_sheet(file_path)
+            try:
+                header_map = self._get_header_map(worksheet)
+                pre_script_column_index = self._ensure_column(worksheet, header_map, 'preScript')
+                ori_step_column_index = header_map.get('oriStep')
+
+                try:
+                    excel_row = self._find_latest_blank_prescript_excel_row(
+                        worksheet, pre_script_column_index, ori_step_column_index,
+                    )
+                except ValueError:
+                    excel_row = worksheet.max_row + 1
+
+                self._write_sheet_cell(worksheet, excel_row, pre_script_column_index, placeholder_prescript)
+                metadata = self._write_append_metadata_to_sheet(
+                    worksheet, header_map, excel_row, normalized_title, placeholder_prescript,
+                )
+                workbook.save(file_path)
+
+                return {
+                    "status": "ok",
+                    "file": file_name,
+                    "title": normalized_title,
+                    "excel_row": excel_row,
+                    "data_row_index": excel_row - 2,
+                    "prescript": placeholder_prescript,
+                    "metadata": metadata,
+                }
+            finally:
+                workbook.close()
+        except Exception as e:
+            raise Exception(f"新增用例失败: {e}")
+
+    def delete_cases(self, file_name: str, excel_rows: List[int]) -> Dict[str, Any]:
+        """按 Excel 行号删除用例（含批量）。第 1 行是表头，数据行号从 2 开始。
+
+        从大到小删除，避免行号在删除过程中发生位移。
+        """
+        file_path = resolve_excel_file(file_name)
+        if not file_path.exists():
+            raise FileNotFoundError(f"文件不存在: {file_name}")
+
+        rows = sorted(
+            {int(r) for r in (excel_rows or []) if r is not None and str(r).strip() != ''},
+            reverse=True,
+        )
+        invalid = [r for r in rows if r < 2]
+        if invalid:
+            raise ValueError(f"无效的Excel行号: {invalid}")
+
+        if not rows:
+            return {"status": "ok", "deleted": 0, "excel_rows": []}
+
+        try:
+            if not self._supports_cell_level_write(file_path):
+                df = pd.read_excel(file_path)
+                valid_indexes = [r - 2 for r in rows if 0 <= (r - 2) < len(df)]
+                if valid_indexes:
+                    df = df.drop(index=valid_indexes)
+                    df = df.reset_index(drop=True)
+                    df.to_excel(file_path, index=False)
+                return {
+                    "status": "ok",
+                    "deleted": len(valid_indexes),
+                    "excel_rows": [i + 2 for i in valid_indexes],
+                }
+
+            workbook, worksheet = self._load_workbook_sheet(file_path)
+            try:
+                for excel_row in rows:
+                    if excel_row <= worksheet.max_row:
+                        worksheet.delete_rows(excel_row, 1)
+                workbook.save(file_path)
+            finally:
+                workbook.close()
+            return {"status": "ok", "deleted": len(rows), "excel_rows": rows}
+        except Exception as e:
+            raise Exception(f"删除用例失败: {e}")
 
 excel_service = ExcelService()

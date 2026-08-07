@@ -5,6 +5,14 @@
                   {{ $t('common.chooseFeature') }}
                 </router-link>
                 <h2 class="mb-0">{{ $t('excelExecution.title') }}</h2>
+                <div v-if="showNoticeMarquee" class="notice-marquee">
+                  <span class="notice-marquee-icon">⚠️</span>
+                  <div class="notice-marquee-viewport">
+                    <div class="notice-marquee-track" @animationend="handleNoticeMarqueeEnd">
+                      <span>{{ $t('excelExecution.noticeMarquee') }}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div class="excel-execution-scroll">
@@ -26,342 +34,192 @@
                   @change="handleVerifyImageFolderChange"
                 >
 
-                <div class="excel-top-grid mb-4">
-                <div v-if="showCompactFileSelectorPanel" class="excel-top-compact-card excel-section-card mb-0 rounded-[24px] border border-white/70 bg-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
-                  <div class="excel-top-compact-header">
-                    <div class="min-w-0">
-                      <p class="eyebrow">{{ $t('excelExecution.chooseExcel') }}</p>
-                      <h3 class="excel-top-compact-title">{{ selectedFile }}</h3>
-                      <p class="excel-top-compact-meta">{{ $t('excelExecution.fileReadyHint') }}</p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <button @click="analyzeFile" class="btn btn-primary btn-sm" :disabled="loadingAnalysis || !selectedFile">
-                        {{ loadingAnalysis ? $t('common.analyzing') : $t('common.analyzeFile') }}
-                      </button>
-                      <button
-                        v-if="validationResult"
-                        @click="openValidationResultModal"
-                        class="btn btn-secondary btn-sm"
-                        :disabled="loadingAnalysis"
-                      >
-                        {{ $t('excelExecution.viewAnalysisResult') }}
-                      </button>
-                      <button @click="expandFileSelectorPanel" class="btn btn-secondary btn-sm">
-                        {{ $t('excelExecution.changeSelectedFile') }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div v-else class="excel-file-panel excel-section-card mb-0 rounded-[28px] border border-white/70 bg-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_40px_rgba(15,23,42,0.08)]">
-                  <h3 class="font-medium mb-3">{{ $t('excelExecution.chooseExcel') }}</h3>
-                  <button @click="loadExcelFiles" class="btn btn-secondary mb-4">
-                    {{ $t('common.refreshFileList') }}
-                  </button>
+                <div class="excel-top-overview-card mb-4 rounded-[16px] border border-white/80 bg-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_40px_rgba(44,62,80,0.06)] overflow-hidden">
+                  <div class="excel-overview-grid">
 
-                  <div v-if="loadingFiles">
-                    <p>{{ $t('common.loading') }}</p>
-                  </div>
+                    <!-- ═══ 选择 Excel ═══ -->
+                    <div class="excel-overview-cell excel-overview-cell--files">
+                      <div v-if="showCompactFileSelectorPanel" class="excel-overview-head">
+                        <div class="min-w-0">
+                          <p class="eyebrow">{{ $t('excelExecution.chooseExcel') }}</p>
+                          <h3 class="excel-overview-title">{{ selectedFile }}</h3>
+                          <p class="excel-overview-meta">{{ $t('excelExecution.fileReadyHint') }}</p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <button @click="analyzeFile" class="btn btn-primary btn-sm" :disabled="loadingAnalysis || !selectedFile">
+                            {{ loadingAnalysis ? $t('common.analyzing') : $t('common.analyzeFile') }}
+                          </button>
+                          <button
+                            v-if="validationResult"
+                            @click="openValidationResultModal"
+                            class="btn btn-secondary btn-sm"
+                            :disabled="loadingAnalysis"
+                          >
+                            {{ $t('excelExecution.viewAnalysisResult') }}
+                          </button>
+                          <button @click="expandFileSelectorPanel" class="btn btn-secondary btn-sm">
+                            {{ $t('excelExecution.changeSelectedFile') }}
+                          </button>
+                        </div>
+                      </div>
 
-                  <div v-if="excelFiles.length > 0">
-                    <p class="mb-3">{{ $t('common.currentDirectoryExcelFiles') }}</p>
-                    <div class="excel-file-list space-y-2 mb-4">
-                      <div
-                        v-for="(file, index) in excelFiles"
-                        :key="file"
-                        class="excel-file-item border rounded-lg p-4 cursor-pointer hover:bg-gray-50"
-                        :class="selectedFile === file ? 'border-primary bg-blue-50' : ''"
-                        @click="selectFile(file)"
-                      >
-                        <div class="flex items-center justify-between gap-4">
-                          <div class="flex-1 min-w-0">
-                            <p class="font-medium">{{ $t('common.fileNumber', { index: index + 1 }) }}</p>
-                            <p class="text-gray-600 truncate">{{ file }}</p>
+                      <div v-else>
+                        <div class="excel-overview-head">
+                          <div class="min-w-0">
+                            <p class="eyebrow">{{ $t('excelExecution.chooseExcel') }}</p>
+                            <h3 class="excel-overview-title">{{ $t('common.currentDirectoryExcelFiles') }}</h3>
                           </div>
-                          <div class="flex items-center gap-2">
-                            <button
-                              @click.stop="deleteFile(file)"
-                              class="btn btn-danger"
-                              :disabled="executing"
-                            >
-                              {{ $t('common.delete') }}
-                            </button>
-                            <div class="text-primary" v-if="selectedFile === file">
-                              ✅
+                          <button @click="loadExcelFiles" class="btn btn-secondary btn-sm">
+                            {{ $t('common.refreshFileList') }}
+                          </button>
+                        </div>
+
+                        <div v-if="loadingFiles" class="mt-3">
+                          <p>{{ $t('common.loading') }}</p>
+                        </div>
+
+                        <div v-if="excelFiles.length > 0" class="excel-file-list space-y-2 mt-3 mb-3">
+                          <div
+                            v-for="(file, index) in excelFiles"
+                            :key="file"
+                            class="excel-file-item border rounded-lg p-3 cursor-pointer hover:bg-gray-50"
+                            :class="selectedFile === file ? 'border-primary bg-blue-50' : ''"
+                            @click="selectFile(file)"
+                          >
+                            <div class="flex items-center justify-between gap-4">
+                              <div class="flex-1 min-w-0">
+                                <p class="font-medium">{{ $t('common.fileNumber', { index: index + 1 }) }}</p>
+                                <p class="text-gray-600 truncate">{{ file }}</p>
+                              </div>
+                              <div class="flex items-center gap-2">
+                                <button @click.stop="deleteFile(file)" class="btn btn-danger" :disabled="executing">
+                                  {{ $t('common.delete') }}
+                                </button>
+                                <div class="text-primary" v-if="selectedFile === file">✅</div>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div class="mb-4 flex items-center gap-2">
-                    <input
-                      type="file"
-                      id="fileUpload"
-                      ref="fileInput"
-                      class="hidden"
-                      accept=".xlsx,.xls"
-                      @change="uploadFile"
-                    >
-                    <button type="button" class="btn btn-primary" @click="handleUploadExcelClick">
-                      {{ $t('common.uploadExcel') }}
-                    </button>
-                    <button @click="analyzeFile" class="btn btn-primary" :disabled="loadingAnalysis || !selectedFile">
-                      {{ loadingAnalysis ? $t('common.analyzing') : $t('common.analyzeFile') }}
-                    </button>
-                    <button
-                      v-if="validationResult"
-                      @click="openValidationResultModal"
-                      class="btn btn-secondary"
-                      :disabled="loadingAnalysis"
-                    >
-                      {{ $t('excelExecution.viewAnalysisResult') }}
-                    </button>
-                  </div>
-
-                  <div v-if="excelFiles.length === 0">
-                    <p class="text-danger mb-4">{{ $t('common.noExcelFiles') }}</p>
-                    <div class="bg-yellow-50 p-4 rounded-lg mb-4">
-                      <h4 class="font-medium mb-2">{{ $t('common.hint') }}</h4>
-                      <p class="text-sm mb-2">
-                        {{ $t('excelExecution.uploadTip1') }}
-                      </p>
-                      <p class="text-sm">
-                        {{ $t('excelExecution.uploadTip2') }}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <section v-if="showCompactModelSelectorPanel" class="excel-top-compact-card excel-section-card mb-0 rounded-[24px] border border-white/70 bg-white/65 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
-                  <div class="excel-top-compact-header">
-                    <div class="min-w-0">
-                      <p class="eyebrow">{{ $t('excelExecution.imageModelSetup') }}</p>
-                      <h3 class="excel-top-compact-title">{{ activeImageModelName || $t('excelExecution.noActiveImageModel') }}</h3>
-                      <p class="excel-top-compact-meta">{{ $t('excelExecution.compareBackend', { backend: currentCompareBackendLabel }) }}</p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <button class="btn btn-secondary btn-sm" @click="loadImageModelStatus" :disabled="loadingImageModelStatus || downloadingImageModel || selectingImageModel || deletingImageModel || clearingImageModelSelection">
-                        {{ loadingImageModelStatus ? $t('common.refreshing') : $t('common.refreshStatus') }}
-                      </button>
-                      <button class="btn btn-secondary btn-sm" @click="expandModelSelectorPanel">
-                        {{ $t('excelExecution.changeSelectedModel') }}
-                      </button>
-                    </div>
-                  </div>
-                </section>
-                <section v-else class="excel-section-card excel-top-model-panel mb-0 rounded-[28px] border border-white/70 bg-white/65 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
-                  <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div class="min-w-0">
-                      <p class="eyebrow">{{ $t('excelExecution.imageModelSetup') }}</p>
-                      <div class="mt-2 flex flex-wrap items-center gap-3">
-                        <h3 class="text-lg font-semibold tracking-tight">{{ $t('excelExecution.imageModelTitle') }}</h3>
-                        <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">
-                          {{ activeImageModelName ? $t('excelExecution.activeImageModel', { model: activeImageModelName }) : $t('excelExecution.noActiveImageModel') }}
-                        </span>
-                      </div>
-                      <p class="mt-2 text-sm leading-6 text-gray-500">
-                        {{ $t('excelExecution.imageModelSubtitle') }}
-                      </p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <button class="btn btn-secondary btn-sm" @click="loadImageModelStatus" :disabled="loadingImageModelStatus || downloadingImageModel || selectingImageModel || deletingImageModel || clearingImageModelSelection">
-                        {{ loadingImageModelStatus ? $t('common.refreshing') : $t('common.refreshStatus') }}
-                      </button>
-                      <button class="btn btn-primary btn-sm" @click="downloadRecommendedImageModel" :disabled="downloadingImageModel || selectingImageModel || deletingImageModel || clearingImageModelSelection || missingImageModelDependencies.length > 0">
-                        {{ downloadingImageModel ? $t('excelExecution.downloadingImageModel') : $t('excelExecution.downloadRecommendedModel') }}
-                      </button>
-                      <button class="btn btn-secondary btn-sm" @click="clearSelectedImageModel" :disabled="clearingImageModelSelection || downloadingImageModel || selectingImageModel || deletingImageModel || !activeImageModelName">
-                        {{ $t('excelExecution.useOpenCv') }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div v-if="imageModelStatusError" class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {{ imageModelStatusError }}
-                  </div>
-
-                  <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-                    <span>{{ $t('excelExecution.compareBackend', { backend: currentCompareBackendLabel }) }}</span>
-                    <span>{{ $t('excelExecution.downloadedModels', { count: imageModelStatus.imported_models?.length || 0 }) }}</span>
-                    <span :class="missingImageModelDependencies.length ? 'text-warning' : 'text-success'">
-                      {{ $t('excelExecution.runtimeStatus', { status: missingImageModelDependencies.length ? $t('common.missingDependencies') : $t('common.ready') }) }}
-                    </span>
-                  </div>
-
-                  <div v-if="imageModelMessage" class="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-                    {{ imageModelMessage }}
-                  </div>
-
-                  <div v-if="missingImageModelDependencies.length" class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-amber-900">
-                    <p class="font-medium">{{ $t('excelExecution.dinoDependencyWarning') }}</p>
-                    <p class="mt-2">{{ $t('excelExecution.currentPython', { version: imageDependencyStatus.python_version || $t('common.unknown') }) }}</p>
-                    <p>{{ $t('excelExecution.recommendedPython', { version: imageDependencyStatus.recommended_python_version || '3.12' }) }}</p>
-                    <p class="mt-1 leading-6">{{ $t('excelExecution.missingDependencies', { dependencies: missingImageModelDependencies.join(', ') }) }}</p>
-
-                    <div v-if="imageDependencyStatus.notes?.length" class="mt-3 space-y-1 text-xs leading-5 text-amber-800">
-                      <div v-for="(note, index) in imageDependencyStatus.notes" :key="index">{{ note }}</div>
-                    </div>
-
-                    <div v-if="imageDependencyStatus.install_steps?.length" class="mt-4 rounded-lg bg-white/70 p-4">
-                      <p class="text-sm font-medium mb-2">{{ $t('excelExecution.handlingSteps') }}</p>
-                      <div class="space-y-1 text-sm leading-6">
-                        <div v-for="(step, index) in imageDependencyStatus.install_steps" :key="index">
-                          {{ index + 1 }}. {{ step }}
+                        <div class="flex items-center gap-2 mt-2">
+                          <input
+                            type="file"
+                            id="fileUpload"
+                            ref="fileInput"
+                            class="hidden"
+                            accept=".xlsx,.xls"
+                            @change="uploadFile"
+                          >
+                          <button type="button" class="btn btn-primary" @click="handleUploadExcelClick">
+                            {{ $t('common.uploadExcel') }}
+                          </button>
+                          <button @click="analyzeFile" class="btn btn-primary" :disabled="loadingAnalysis || !selectedFile">
+                            {{ loadingAnalysis ? $t('common.analyzing') : $t('common.analyzeFile') }}
+                          </button>
+                          <button
+                            v-if="validationResult"
+                            @click="openValidationResultModal"
+                            class="btn btn-secondary"
+                            :disabled="loadingAnalysis"
+                          >
+                            {{ $t('excelExecution.viewAnalysisResult') }}
+                          </button>
                         </div>
-                      </div>
-                    </div>
 
-                    <div v-if="imageDependencyStatus.install_commands?.length" class="mt-4 rounded-lg bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">
-                      <div v-for="(command, index) in imageDependencyStatus.install_commands" :key="index">{{ command }}</div>
-                    </div>
-                  </div>
-
-                  <div v-if="imageModelStatus.imported_models?.length" class="space-y-2 mt-4">
-                    <div v-for="model in imageModelStatus.imported_models" :key="model.name" class="border rounded-lg p-4 bg-white/80">
-                      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div class="flex-1 min-w-0">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <p class="font-medium">{{ model.name }}</p>
-                            <span v-if="model.is_active" class="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">{{ $t('excelExecution.modelInUse') }}</span>
-                            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ $t('excelExecution.modelFiles', { count: model.file_count }) }}</span>
+                        <div v-if="excelFiles.length === 0" class="mt-3">
+                          <p class="text-danger mb-4">{{ $t('common.noExcelFiles') }}</p>
+                          <div class="bg-yellow-50 p-4 rounded-lg mb-4">
+                            <h4 class="font-medium mb-2">{{ $t('common.hint') }}</h4>
+                            <p class="text-sm mb-2">{{ $t('excelExecution.uploadTip1') }}</p>
+                            <p class="text-sm">{{ $t('excelExecution.uploadTip2') }}</p>
                           </div>
-                          <p v-if="model.repo_id" class="mt-2 text-xs text-gray-500 break-all">{{ model.repo_id }}</p>
-                          <p class="text-gray-500 text-sm break-all mt-2">{{ model.path }}</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <button class="btn btn-secondary" @click="selectImageModel(model.name)" :disabled="selectingImageModel || deletingImageModel || downloadingImageModel || clearingImageModelSelection || model.is_active || missingImageModelDependencies.length > 0">
-                            {{ model.is_active ? $t('excelExecution.selectedImageModel') : $t('excelExecution.useThisImageModel') }}
-                          </button>
-                          <button class="btn btn-danger" @click="deleteImageModel(model.name)" :disabled="deletingImageModel || selectingImageModel || downloadingImageModel || clearingImageModelSelection">
-                            {{ $t('common.delete') }}
-                          </button>
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div v-else class="mt-4 bg-yellow-50 p-4 rounded-lg">
-                    <p class="text-sm text-gray-600">{{ $t('excelExecution.noDownloadedModels') }}</p>
+                    <!-- ═══ 报告 ═══ -->
+                    <div class="excel-overview-cell excel-overview-cell--report">
+                      <div class="excel-overview-head">
+                        <div class="min-w-0">
+                          <p class="eyebrow">{{ $t('reports.groups.image.eyebrow') }}</p>
+                          <h3 class="excel-overview-title">{{ $t('reports.groups.image.title') }}</h3>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">{{ imageReportRows.length }}</span>
+                          <button class="btn btn-secondary btn-sm" @click="loadImageReports" :disabled="loadingImageReports">
+                            {{ loadingImageReports ? $t('common.refreshing') : $t('common.refreshStatus') }}
+                          </button>
+                          <button class="btn btn-secondary btn-sm" @click="showCompactReportPanel ? expandReportPanel() : collapseReportPanel()">
+                            {{ showCompactReportPanel ? $t('excelExecution.expandReportPanel') : $t('excelExecution.collapseReportPanel') }}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div v-if="imageReportsError" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {{ imageReportsError }}
+                      </div>
+                      <div v-else-if="loadingImageReports && !imageReportRows.length" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                        {{ $t('common.loading') }}
+                      </div>
+                      <div v-else-if="latestImageReport" class="mt-3 flex flex-wrap items-center gap-4">
+                        <div class="excel-report-donut">
+                          <svg viewBox="0 0 84 84" class="excel-report-donut-svg">
+                            <circle class="excel-report-donut-track" cx="42" cy="42" r="34"></circle>
+                            <circle
+                              class="excel-report-donut-bar"
+                              :class="`excel-report-donut-bar--${reportDonutTone}`"
+                              cx="42" cy="42" r="34"
+                              :stroke-dasharray="reportDonutDash"
+                              stroke-linecap="round"
+                              transform="rotate(-90 42 42)"
+                            ></circle>
+                          </svg>
+                          <div class="excel-report-donut-center">
+                            <span class="excel-report-donut-value">{{ reportPassRate }}%</span>
+                            <span class="excel-report-donut-label">{{ $t('reports.list.passRate') }}</span>
+                          </div>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <span :class="['excel-report-overview-pill', `excel-report-overview-pill-${latestImageReport.overviewTone}`]">
+                            {{ latestImageReport.overviewText }}
+                          </span>
+                          <p class="mt-2 text-sm font-medium text-slate-700 truncate">{{ latestImageReport.title }}</p>
+                          <div class="excel-report-metrics mt-2">
+                            <span class="excel-report-metric excel-report-metric--pass">{{ $t('reports.detail.summary.passed') }} {{ latestImageReport.summary.passed }}</span>
+                            <span class="excel-report-metric excel-report-metric--fail">{{ $t('reports.detail.summary.failed') }} {{ latestImageReport.summary.failed }}</span>
+                            <span class="excel-report-metric">{{ $t('reports.detail.summary.total') }} {{ latestImageReport.summary.total }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-else class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                        {{ $t('excelExecution.reportReadyHint') }}
+                      </div>
+
+                      <div v-if="!showCompactReportPanel && imageReportRows.length" class="excel-report-list mt-3">
+                        <article v-for="item in imageReportRows" :key="item.report_id" class="excel-report-row">
+                          <div class="excel-report-main">
+                            <strong>{{ item.title }}</strong>
+                            <p>{{ formatReportDate(item.updated_at) }} · {{ $t('reports.groups.image.kindLabel') }}</p>
+                          </div>
+                          <div class="excel-report-summary">
+                            <span :class="['excel-report-overview-pill', `excel-report-overview-pill-${item.overviewTone}`]">{{ item.overviewText }}</span>
+                            <div class="excel-report-metrics">
+                              <span>{{ $t('reports.detail.summary.total') }} {{ item.summary.total }}</span>
+                              <span>{{ $t('reports.detail.summary.passed') }} {{ item.summary.passed }}</span>
+                              <span>{{ $t('reports.detail.summary.failed') }} {{ item.summary.failed }}</span>
+                              <span>{{ $t('reports.list.passRate') }} {{ item.passRate }}</span>
+                            </div>
+                          </div>
+                          <div class="excel-report-actions">
+                            <button type="button" class="btn btn-primary btn-sm" :disabled="!item.report_url" @click="openReport(item.report_url)">
+                              {{ $t('reports.detail.openHtml') }}
+                            </button>
+                          </div>
+                        </article>
+                      </div>
+                    </div>
                   </div>
-                </section>
                 </div>
-                <section v-if="showCompactReportPanel" class="excel-top-compact-card excel-section-card excel-report-panel mb-6 rounded-[24px] border border-white/70 bg-white/65 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
-                  <div class="excel-top-compact-header">
-                    <div class="min-w-0">
-                      <p class="eyebrow">{{ $t('reports.groups.image.eyebrow') }}</p>
-                      <h3 class="excel-top-compact-title">{{ $t('reports.groups.image.title') }}</h3>
-                      <p class="excel-top-compact-meta">
-                        {{ latestImageReport ? latestImageReport.title : $t('excelExecution.noImageReports') }}
-                      </p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">
-                        {{ imageReportRows.length }}
-                      </span>
-                      <button class="btn btn-secondary btn-sm" @click="loadImageReports" :disabled="loadingImageReports">
-                        {{ loadingImageReports ? $t('common.refreshing') : $t('common.refreshStatus') }}
-                      </button>
-                      <button class="btn btn-secondary btn-sm" @click="expandReportPanel">
-                        {{ $t('excelExecution.expandReportPanel') }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div v-if="imageReportsError" class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {{ imageReportsError }}
-                  </div>
-
-                  <div v-else-if="loadingImageReports && !imageReportRows.length" class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                    {{ $t('common.loading') }}
-                  </div>
-
-                  <div v-else-if="latestImageReport" class="mt-4 flex flex-wrap items-center gap-3">
-                    <span :class="['excel-report-overview-pill', `excel-report-overview-pill-${latestImageReport.overviewTone}`]">
-                      {{ latestImageReport.overviewText }}
-                    </span>
-                    <div class="excel-report-metrics">
-                      <span>{{ $t('reports.detail.summary.total') }} {{ latestImageReport.summary.total }}</span>
-                      <span>{{ $t('reports.detail.summary.passed') }} {{ latestImageReport.summary.passed }}</span>
-                      <span>{{ $t('reports.detail.summary.failed') }} {{ latestImageReport.summary.failed }}</span>
-                      <span>{{ $t('reports.list.passRate') }} {{ latestImageReport.passRate }}</span>
-                    </div>
-                  </div>
-
-                  <div v-else class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                    {{ $t('excelExecution.reportReadyHint') }}
-                  </div>
-                </section>
-
-                <section v-else class="excel-section-card excel-report-panel mb-6 rounded-[28px] border border-white/70 bg-white/65 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_20px_44px_rgba(15,23,42,0.08)]">
-                  <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div class="min-w-0">
-                      <p class="eyebrow">{{ $t('reports.groups.image.eyebrow') }}</p>
-                      <div class="mt-2 flex flex-wrap items-center gap-3">
-                        <h3 class="text-lg font-semibold tracking-tight">{{ $t('reports.groups.image.title') }}</h3>
-                        <span class="rounded-full bg-white/80 px-3 py-1 text-sm text-gray-500">
-                          {{ imageReportRows.length }}
-                        </span>
-                      </div>
-                      <p class="mt-2 text-sm leading-6 text-gray-500">
-                        {{ $t('reports.groups.image.description') }}
-                      </p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <button class="btn btn-secondary btn-sm" @click="loadImageReports" :disabled="loadingImageReports">
-                        {{ loadingImageReports ? $t('common.refreshing') : $t('common.refreshStatus') }}
-                      </button>
-                      <button class="btn btn-secondary btn-sm" @click="collapseReportPanel">
-                        {{ $t('excelExecution.collapseReportPanel') }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div v-if="imageReportsError" class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {{ imageReportsError }}
-                  </div>
-
-                  <div v-else-if="loadingImageReports && !imageReportRows.length" class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                    {{ $t('common.loading') }}
-                  </div>
-
-                  <div v-else-if="imageReportRows.length" class="excel-report-list mt-4">
-                    <article v-for="item in imageReportRows" :key="item.report_id" class="excel-report-row">
-                      <div class="excel-report-main">
-                        <strong>{{ item.title }}</strong>
-                        <p>{{ formatReportDate(item.updated_at) }} · {{ $t('reports.groups.image.kindLabel') }}</p>
-                      </div>
-
-                      <div class="excel-report-summary">
-                        <span :class="['excel-report-overview-pill', `excel-report-overview-pill-${item.overviewTone}`]">
-                          {{ item.overviewText }}
-                        </span>
-                        <div class="excel-report-metrics">
-                          <span>{{ $t('reports.detail.summary.total') }} {{ item.summary.total }}</span>
-                          <span>{{ $t('reports.detail.summary.passed') }} {{ item.summary.passed }}</span>
-                          <span>{{ $t('reports.detail.summary.failed') }} {{ item.summary.failed }}</span>
-                          <span>{{ $t('reports.list.passRate') }} {{ item.passRate }}</span>
-                        </div>
-                      </div>
-
-                      <div class="excel-report-actions">
-                        <button
-                          type="button"
-                          class="btn btn-primary btn-sm"
-                          :disabled="!item.report_url"
-                          @click="openReport(item.report_url)"
-                        >
-                          {{ $t('reports.detail.openHtml') }}
-                        </button>
-                      </div>
-                    </article>
-                  </div>
-
-                  <div v-else class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                    {{ $t('excelExecution.noImageReports') }}
-                  </div>
-                </section>
-
                 <div v-if="selectedFile" class="mb-6">
                   <div v-if="loadingAnalysis">
                     <p>{{ $t('common.analyzing') }}</p>
@@ -397,6 +255,20 @@
                       <div class="excel-sticky-bar">
                         <div class="mb-4 flex justify-between items-center gap-3">
                           <div class="flex flex-wrap gap-3">
+                            <button
+                              @click="addNewCase()"
+                              class="btn btn-secondary"
+                              :disabled="!selectedFile || isBatchExecuting"
+                            >
+                              {{ $t('excelExecution.addCase') }}
+                            </button>
+                            <button
+                              @click="deleteSelectedCases()"
+                              class="btn btn-danger"
+                              :disabled="selectedRows.length === 0 || isBatchExecuting"
+                            >
+                              {{ $t('excelExecution.deleteSelected', { count: selectedRows.length }) }}
+                            </button>
                             <button
                               @click="executeSelectedRows()"
                               class="btn btn-success"
@@ -460,7 +332,7 @@
 
                         <div class="mt-4 h-3 overflow-hidden rounded-full bg-white/85">
                           <div
-                            class="h-full rounded-full bg-gradient-to-r from-sky-500 via-cyan-500 to-emerald-500 transition-all duration-300"
+                            class="h-full rounded-full bg-gradient-to-r from-[#1890ff] to-[#0e7adf] transition-all duration-300"
                             :style="{ width: `${batchExecutionPercent}%` }"
                           ></div>
                         </div>
@@ -514,15 +386,48 @@
                             <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors"
-                                :class="screenshotSource === 'adb' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="screenshotSource === 'adb' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="screenshotSource = 'adb'"
                               >ADB</button>
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
-                                :class="screenshotSource === 'capture_card' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="screenshotSource === 'capture_card' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="screenshotSource = 'capture_card'"
                               >采集卡</button>
                             </div>
+                          </div>
+
+                          <!-- 采集卡设备（仅截图来源为采集卡时显示） -->
+                          <div v-if="screenshotSource === 'capture_card'" class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">采集卡设备</label>
+                            <div class="flex items-center gap-2">
+                              <select
+                                :value="execCaptureCardActiveDeviceId"
+                                class="form-input text-sm flex-1 min-w-0"
+                                :disabled="execCaptureCardListLoading || execCaptureCardSwitching"
+                                @change="onExecCaptureCardDeviceSelectChange"
+                              >
+                                <option v-if="execCaptureCardDevicesList.length === 0" :value="execCaptureCardActiveDeviceId">
+                                  {{ execCaptureCardListLoading ? '扫描中...' : '未找到设备' }}
+                                </option>
+                                <option
+                                  v-for="dev in execCaptureCardDevicesList"
+                                  :key="dev.device_id"
+                                  :value="dev.device_id"
+                                >
+                                  {{ dev.label }}
+                                </option>
+                              </select>
+                              <button
+                                type="button"
+                                class="btn btn-secondary btn-sm whitespace-nowrap"
+                                :disabled="execCaptureCardListLoading || execCaptureCardSwitching"
+                                @click="loadExecCaptureCardDevices"
+                              >
+                                {{ execCaptureCardListLoading ? '扫描中...' : '重新扫描' }}
+                              </button>
+                            </div>
+                            <span v-if="execCaptureCardError" class="text-[11px] text-rose-600">{{ execCaptureCardError }}</span>
                           </div>
 
                           <!-- 执行模式 -->
@@ -531,17 +436,17 @@
                             <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors"
-                                :class="executionMode === 'single' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="executionMode === 'single' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="executionMode = 'single'"
                               >单次</button>
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
-                                :class="executionMode === 'loop_row' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="executionMode === 'loop_row' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="executionMode = 'loop_row'"
                               >单行循环</button>
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
-                                :class="executionMode === 'loop_list' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="executionMode === 'loop_list' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="executionMode = 'loop_list'"
                               >列表循环</button>
                             </div>
@@ -555,12 +460,12 @@
                                 <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
                                   <button
                                     class="px-3 py-1.5 transition-colors"
-                                    :class="loopType === 'finite' ? 'bg-emerald-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                    :class="loopType === 'finite' ? 'bg-[#e8f7ee] text-[#1f9d55]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                     @click="loopType = 'finite'"
                                   >有限</button>
                                   <button
                                     class="px-3 py-1.5 transition-colors border-l border-gray-200"
-                                    :class="loopType === 'infinite' ? 'bg-emerald-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                    :class="loopType === 'infinite' ? 'bg-[#e8f7ee] text-[#1f9d55]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                     @click="loopType = 'infinite'"
                                   >无限</button>
                                 </div>
@@ -584,12 +489,12 @@
                             <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors"
-                                :class="enableVerification ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="enableVerification ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="enableVerification = true"
                               >开启</button>
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
-                                :class="!enableVerification ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="!enableVerification ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="enableVerification = false"
                               >关闭</button>
                             </div>
@@ -601,14 +506,83 @@
                             <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors"
-                                :class="enableRecording ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="enableRecording ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="enableRecording = true"
                               >开启</button>
                               <button
                                 class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
-                                :class="!enableRecording ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                :class="!enableRecording ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
                                 @click="enableRecording = false"
                               >关闭</button>
+                            </div>
+                          </div>
+
+                          <!-- 颜色相似度下限 -->
+                          <div class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">颜色相似度下限</label>
+                            <div class="flex items-center gap-2">
+                              <input
+                                v-model.number="colorMinSimilarity"
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="flex-1"
+                              >
+                              <input
+                                v-model.number="colorMinSimilarity"
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="form-input w-16 text-center text-sm"
+                              >
+                            </div>
+                          </div>
+
+                          <!-- 颜色权重 -->
+                          <div class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">颜色权重</label>
+                            <div class="flex items-center gap-2">
+                              <input
+                                v-model.number="colorWeight"
+                                type="range"
+                                min="0"
+                                max="0.6"
+                                step="0.01"
+                                class="flex-1"
+                              >
+                              <input
+                                v-model.number="colorWeight"
+                                type="number"
+                                min="0"
+                                max="0.6"
+                                step="0.01"
+                                class="form-input w-16 text-center text-sm"
+                              >
+                            </div>
+                          </div>
+
+                          <!-- 特征相似度下限 -->
+                          <div class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">特征相似度下限</label>
+                            <div class="flex items-center gap-2">
+                              <input
+                                v-model.number="featureMinSimilarity"
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="flex-1"
+                              >
+                              <input
+                                v-model.number="featureMinSimilarity"
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="form-input w-16 text-center text-sm"
+                              >
                             </div>
                           </div>
 
@@ -734,6 +708,13 @@
                                     :disabled="savingCaseFields || executingRows[item.idx]"
                                   >
                                     {{ $t('common.edit') }}
+                                  </button>
+                                  <button
+                                    @click="deleteCase(item)"
+                                    class="btn btn-danger min-w-[88px] whitespace-nowrap"
+                                    :disabled="isBatchExecuting || executingRows[item.idx]"
+                                  >
+                                    {{ $t('excelExecution.deleteCase') }}
                                   </button>
                                   <button
                                     v-if="!executingRows[item.idx]"
@@ -939,7 +920,7 @@
                       type="button"
                       class="px-3 py-1 rounded-full text-xs border transition-colors"
                       :class="{
-                        'bg-blue-600 text-white border-blue-600': idx === modalAssertActiveIndex,
+                        'bg-[#1890ff] text-white border-[#1890ff]': idx === modalAssertActiveIndex,
                         'bg-white text-slate-600 border-slate-300 hover:border-blue-400': idx !== modalAssertActiveIndex,
                       }"
                       @click="switchModalAssertResult(idx)"
@@ -1111,7 +1092,7 @@
                       type="button"
                       class="px-2.5 py-1 rounded-full text-xs border transition-colors"
                       :class="{
-                        'bg-blue-600 text-white border-blue-600': idx === verifyImagePreviewActiveIndex,
+                        'bg-[#1890ff] text-white border-[#1890ff]': idx === verifyImagePreviewActiveIndex,
                         'bg-white text-slate-600 border-slate-300 hover:border-blue-400': idx !== verifyImagePreviewActiveIndex,
                         'opacity-60': item.missing,
                       }"
@@ -1513,28 +1494,28 @@
               class="w-full text-left px-3 py-1.5 text-sm hover:bg-green-50 text-green-700 flex items-center gap-2"
               @click="setResultValue(resultPopoverIndex, 'PASS')"
             >
-              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span class="w-2 h-2 rounded-full bg-[#52c41a]"></span>
               PASS
             </button>
             <button
               class="w-full text-left px-3 py-1.5 text-sm hover:bg-red-50 text-red-700 flex items-center gap-2"
               @click="setResultValue(resultPopoverIndex, 'Fail')"
             >
-              <span class="w-2 h-2 rounded-full bg-red-500"></span>
+              <span class="w-2 h-2 rounded-full bg-[#f5222d]"></span>
               Fail
             </button>
             <button
               class="w-full text-left px-3 py-1.5 text-sm hover:bg-amber-50 text-amber-700 flex items-center gap-2"
               @click="setResultValue(resultPopoverIndex, 'NT')"
             >
-              <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span class="w-2 h-2 rounded-full bg-[#fa8c16]"></span>
               NT
             </button>
             <button
               class="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 text-blue-700 flex items-center gap-2"
               @click="setResultValue(resultPopoverIndex, 'NA')"
             >
-              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span class="w-2 h-2 rounded-full bg-[#1890ff]"></span>
               NA
             </button>
             <button
@@ -1568,33 +1549,35 @@
           </div>
         </Transition>
           </template>
-
 <script setup>
 import { ref, onMounted, computed, watch, onUnmounted, nextTick, reactive } from 'vue'
-import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+
+// 命名组件，供 ExcelFeatureLayout 内的 <keep-alive include="ExcelExecution"> 缓存匹配
+defineOptions({ name: 'ExcelExecution' })
+import {
+  beginExecution,
+  executionState,
+  isExecutionRunning,
+  finishExecution as finishExecutionStore,
+  recordRowResult,
+  registerStopHandler,
+} from '../stores/executionStore'
 import { useI18n } from 'vue-i18n'
 import UploadExcelConfirmModal from '../components/UploadExcelConfirmModal.vue'
 import { useUploadExcelConfirm } from '../composables/useUploadExcelConfirm.js'
+import { showAlert as alert, showConfirm as confirm, showPrompt as prompt } from '../stores/dialogStore'
 
 const { t } = useI18n({ useScope: 'global' })
 
-const createEmptyImageModelStatus = () => ({
-  imported_models: [],
-  active_model: null,
-  compare_backend: 'opencv',
-  dependencies: {
-    missing: [],
-    install_steps: [],
-    install_commands: [],
-    notes: [],
-    python_version: '',
-    recommended_python_version: '3.12'
-  },
-  recommended_model: {
-    name: 'DINOv2-Base',
-    repo_id: 'facebook/dinov2-base'
+// 标题右侧走马灯提示：轮播 10 次后自动消失
+const showNoticeMarquee = ref(true)
+const handleNoticeMarqueeEnd = (event) => {
+  if (event?.animationName && event.animationName !== 'notice-marquee-scroll') {
+    return
   }
-})
+  showNoticeMarquee.value = false
+}
 
 const selectedDevice = ref('')
 const excelFiles = ref([])
@@ -1686,14 +1669,9 @@ const currentPage = ref(1)
 const jumpPage = ref(1)
 const pageSize = ref(20)
 const isBatchExecuting = ref(false)
-const hasExecutionInProgress = computed(() => {
-  if (isBatchExecuting.value) {
-    return true
-  }
-
-  return Object.values(executingRows.value).some(Boolean)
-})
 const savingCaseFields = ref(false)
+const invalidKeysToast = ref(null)
+let invalidKeysToastTimer = null
 const batchExecutionState = reactive({
   active: false,
   status: 'idle',
@@ -1704,9 +1682,7 @@ const batchExecutionState = reactive({
   currentCaseTitle: ''
 })
 const fileSelectorPanelExpanded = ref(false)
-const modelSelectorPanelExpanded = ref(false)
 const reportPanelExpanded = ref(false)
-const imageCompareBackendConfirmed = ref(false)
 const matchThreshold = ref(0.8)
 const screenshotSource = ref('adb')
 const executionMode = ref('single')
@@ -1715,6 +1691,50 @@ const loopCount = ref(10)
 const showExecutionSettings = ref(false)
 const enableVerification = ref(true)
 const enableRecording = ref(true)
+// 图片校验参数（后端 customization.json 全局区，image_service 运行时读取）
+const colorMinSimilarity = ref(0.4)
+const colorWeight = ref(0.2)
+const featureMinSimilarity = ref(0.3)
+let colorVerifyConfigTimer = null
+
+const loadColorVerifyConfig = async () => {
+  try {
+    const res = await fetch('/api/customization/color-verify-config')
+    if (res.ok) {
+      const data = await res.json()
+      const minSimilarity = Number(data.color_min_similarity)
+      const weight = Number(data.color_weight)
+      const featureMin = Number(data.feature_min_similarity)
+      colorMinSimilarity.value = Number.isFinite(minSimilarity) ? minSimilarity : 0.4
+      colorWeight.value = Number.isFinite(weight) ? weight : 0.2
+      featureMinSimilarity.value = Number.isFinite(featureMin) ? featureMin : 0.3
+    }
+  } catch (error) {
+    console.error('加载图片校验配置失败:', error)
+  }
+}
+
+const saveColorVerifyConfig = async () => {
+  try {
+    await fetch('/api/customization/color-verify-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        color_min_similarity: colorMinSimilarity.value,
+        color_weight: colorWeight.value,
+        feature_min_similarity: featureMinSimilarity.value,
+      })
+    })
+  } catch (error) {
+    console.error('保存图片校验配置失败:', error)
+  }
+}
+
+// 校验参数改动后防抖保存到后端（image_service 每次校验实时读取，立即生效）
+watch([colorMinSimilarity, colorWeight, featureMinSimilarity], () => {
+  if (colorVerifyConfigTimer) clearTimeout(colorVerifyConfigTimer)
+  colorVerifyConfigTimer = setTimeout(saveColorVerifyConfig, 500)
+})
 const MAX_PERSISTED_EXECUTION_RESULTS = 200
 const EXCEL_EXECUTION_STORAGE_KEY = 'checkpilot.excelExecution.state'
 const VERIFY_IMAGE_FOLDER_DB_NAME = 'checkpilot.excelExecution.directoryHandles'
@@ -1747,6 +1767,7 @@ const editMappingSchemeError = ref('')
 // 设备画面 + 框选保存截图
 const EDIT_DEVICE_PREVIEW_SOURCE_ADB = 'adb'
 const EDIT_DEVICE_PREVIEW_SOURCE_CAPTURE_CARD = 'capture_card'
+const EDIT_DEVICE_PREVIEW_SOURCE_SCRCPY = 'scrcpy'
 const EDIT_DEVICE_PREVIEW_REFRESH_INTERVAL = 3000
 const editDevicePreviewSource = ref(EDIT_DEVICE_PREVIEW_SOURCE_ADB)
 const editDevicePreviewUrl = ref('')
@@ -1776,18 +1797,18 @@ const editCaptureCardSwitching = ref(false)
 const editCaptureCardError = ref('')
 let editCaptureCardListLoaded = false
 
+// 执行面板：采集卡设备选择
+const execCaptureCardDevicesList = ref([])
+const execCaptureCardActiveDeviceId = ref(null)
+const execCaptureCardListLoading = ref(false)
+const execCaptureCardSwitching = ref(false)
+const execCaptureCardError = ref('')
+let execCaptureCardListLoaded = false
+
 // 执行步骤按钮
 const executingEditCaseSteps = ref(false)
 const editCaseStepsMessage = ref('')
 const editCaseStepsError = ref('')
-const imageModelStatus = ref(createEmptyImageModelStatus())
-const loadingImageModelStatus = ref(false)
-const downloadingImageModel = ref(false)
-const selectingImageModel = ref(false)
-const deletingImageModel = ref(false)
-const clearingImageModelSelection = ref(false)
-const imageModelStatusError = ref('')
-const imageModelMessage = ref('')
 const imageReports = ref([])
 const loadingImageReports = ref(false)
 const imageReportsError = ref('')
@@ -2027,7 +2048,6 @@ const persistExecutionState = () => {
     localStorage.setItem(EXCEL_EXECUTION_STORAGE_KEY, JSON.stringify({
       selectedDevice: selectedDevice.value || '',
       selectedFile: selectedFile.value || '',
-      imageCompareBackendConfirmed: Boolean(imageCompareBackendConfirmed.value),
       rowIndex: rowIndex.value,
       filterResult: filterResult.value,
       searchKeyword: searchKeyword.value,
@@ -2047,6 +2067,7 @@ const persistExecutionState = () => {
       loopCount: loopCount.value,
       enableVerification: enableVerification.value,
       enableRecording: enableRecording.value,
+      execCaptureCardActiveDeviceId: execCaptureCardActiveDeviceId.value,
     }))
   } catch (error) {
     console.error('保存页面状态失败:', error)
@@ -2060,7 +2081,7 @@ const applyRowResultMetaToAnalysis = () => {
 
   Object.entries(rowResultMeta.value || {}).forEach(([rowIndexKey, meta]) => {
     const numericIndex = Number(rowIndexKey)
-    const rowData = excelAnalysis.value?.valid_rows?.[numericIndex - 1]
+    const rowData = findRowByExcelRow(numericIndex)
     if (rowData && meta?.verify_result) {
       rowData.result = meta.verify_result
     }
@@ -2137,13 +2158,14 @@ const restoreExecutionState = async () => {
       await analyzeFile({ silent: true, resetView: false })
     }
 
-    imageCompareBackendConfirmed.value = Boolean(savedState.imageCompareBackendConfirmed || activeImageModelName.value)
-
     if (typeof savedState.matchThreshold === 'number' && savedState.matchThreshold >= 0 && savedState.matchThreshold <= 1) {
       matchThreshold.value = savedState.matchThreshold
     }
     if (savedState.screenshotSource === 'capture_card') {
       screenshotSource.value = 'capture_card'
+    }
+    if (typeof savedState.execCaptureCardActiveDeviceId === 'number' && Number.isInteger(savedState.execCaptureCardActiveDeviceId)) {
+      execCaptureCardActiveDeviceId.value = savedState.execCaptureCardActiveDeviceId
     }
     if (['single', 'loop_row', 'loop_list'].includes(savedState.executionMode)) {
       executionMode.value = savedState.executionMode
@@ -2167,10 +2189,30 @@ const restoreExecutionState = async () => {
     currentPage.value = Number(savedState.currentPage) || 1
     jumpPage.value = Number(savedState.jumpPage) || currentPage.value
     pageSize.value = Number(savedState.pageSize) || 20
-    selectedRows.value = Array.isArray(savedState.selectedRows) ? savedState.selectedRows : []
+    // 用 Excel 行号作为稳定标识恢复 selectedRows（旧格式为位置索引，需丢弃）
+    const validRowNumbers = new Set((excelAnalysis.value?.valid_rows || []).map(r => r.row))
+    if (Array.isArray(savedState.selectedRows) && savedState.selectedRows.length > 0) {
+      const isValidFormat = savedState.selectedRows.every(id => validRowNumbers.has(id))
+      selectedRows.value = isValidFormat ? savedState.selectedRows : []
+    } else {
+      selectedRows.value = []
+    }
     executionResults.value = Array.isArray(savedState.executionResults) ? savedState.executionResults : []
-    rowScreenshots.value = savedState.rowScreenshots && typeof savedState.rowScreenshots === 'object' ? savedState.rowScreenshots : {}
-    rowResultMeta.value = savedState.rowResultMeta && typeof savedState.rowResultMeta === 'object' ? savedState.rowResultMeta : {}
+    // rowScreenshots/rowResultMeta 的 key 需为 Excel 行号，旧格式（位置索引）数据不可靠，直接丢弃
+    if (savedState.rowScreenshots && typeof savedState.rowScreenshots === 'object') {
+      const sampleKeys = Object.keys(savedState.rowScreenshots)
+      const isNewFormat = sampleKeys.length === 0 || sampleKeys.some(k => validRowNumbers.has(Number(k)))
+      rowScreenshots.value = isNewFormat ? savedState.rowScreenshots : {}
+    } else {
+      rowScreenshots.value = {}
+    }
+    if (savedState.rowResultMeta && typeof savedState.rowResultMeta === 'object') {
+      const sampleKeys = Object.keys(savedState.rowResultMeta)
+      const isNewFormat = sampleKeys.length === 0 || sampleKeys.some(k => validRowNumbers.has(Number(k)))
+      rowResultMeta.value = isNewFormat ? savedState.rowResultMeta : {}
+    } else {
+      rowResultMeta.value = {}
+    }
     applyRowResultMetaToAnalysis()
 
     const restoredVerifyFolder = await restorePersistedVerifyImageFolder()
@@ -2211,67 +2253,9 @@ const isAbortError = (error) => {
   return error.name === 'AbortError' || message.includes('abort') || message.includes('aborted')
 }
 
-const confirmStopExecutionBeforeLeave = () => {
-  if (!hasExecutionInProgress.value) {
-    return true
-  }
-
-  const confirmed = confirm(t('excelExecution.alerts.leaveWhileExecutingConfirm'))
-  if (!confirmed) {
-    return false
-  }
-
-  stopAllExecution()
-  return true
-}
-
-// 导航守卫，处理页面离开时的确认
-
-onBeforeRouteLeave((to, from, next) => {
-  if (!confirmStopExecutionBeforeLeave()) {
-    next(false)
-    return
-  }
-
-  // 检查是否有截图
-  if (Object.keys(rowScreenshots.value).length > 0) {
-    const confirmLeave = confirm(t('excelExecution.alerts.leavePageConfirm'))
-    if (confirmLeave) {
-      // 调用API删除所有截图
-      fetch('/api/screenshot/clear', {
-        method: 'DELETE'
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('清除截图成功:', data)
-        // 清除前端截图状态
-        Object.keys(rowScreenshots.value).forEach(key => {
-          delete rowScreenshots.value[key]
-        })
-        // 强制响应式更新
-        rowScreenshots.value = { ...rowScreenshots.value }
-        next()
-      })
-      .catch(error => {
-        console.error('清除截图失败:', error)
-        // 即使API调用失败，也要继续导航
-        rowScreenshots.value = {}
-        next()
-      })
-    } else {
-      // 取消导航
-      next(false)
-    }
-  } else {
-    // 没有截图，直接离开
-    next()
-  }
-})
-
 onUnmounted(() => {
-  Object.keys(executionAbortControllers.value).forEach((key) => {
-    abortExecution(key)
-  })
+  // 注意：不再在卸载时 abort 执行——组件被 keep-alive 缓存，离开页面时执行需继续。
+  // 仅清理与执行无关的资源。
   void stopAndResetEditKeyMonitor()
   clearLocalVerifyImageCache()
   document.removeEventListener('click', closeResultPopover)
@@ -2281,10 +2265,16 @@ onUnmounted(() => {
 
 
 
+// 根据 Excel 行号查找 valid_rows 中的行数据（稳定标识，不随 valid_rows 内容变化而偏移）
+const findRowByExcelRow = (excelRowNum) => {
+  const rows = excelAnalysis.value?.valid_rows || []
+  return rows.find(r => r.row === excelRowNum) || null
+}
+
 // 计算属性：筛选和搜索后的行
 const filteredRows = computed(() => {
   if (!excelAnalysis.value || !excelAnalysis.value.valid_rows) return []
-  let items = excelAnalysis.value.valid_rows.map((row, i) => ({ row, idx: i + 1 }))
+  let items = excelAnalysis.value.valid_rows.map((row) => ({ row, idx: row.row }))
   if (filterResult.value) {
     if (filterResult.value === 'empty') {
       items = items.filter(x => !x.row.test_result || x.row.test_result === '')
@@ -2312,7 +2302,7 @@ const pagedRows = computed(() => {
 })
 const allRowIndexes = computed(() => {
   const validRows = excelAnalysis.value?.valid_rows || []
-  return validRows.map((_, index) => index + 1)
+  return validRows.map(row => row.row)
 })
 const isPageAllSelected = computed(() => {
   if (pagedRows.value.length === 0) return false
@@ -2334,27 +2324,9 @@ const executionLogStats = computed(() => {
   }, { info: 0, success: 0, error: 0 })
 })
 
-const imageDependencyStatus = computed(() => imageModelStatus.value?.dependencies || createEmptyImageModelStatus().dependencies)
-const missingImageModelDependencies = computed(() => Array.isArray(imageDependencyStatus.value.missing) ? imageDependencyStatus.value.missing : [])
-const activeImageModelName = computed(() => imageModelStatus.value?.active_model?.name || '')
-const isOpenCvCompareBackend = computed(() => (imageModelStatus.value?.compare_backend || 'opencv') === 'opencv')
 const hasAnalyzedCurrentFile = computed(() => Boolean(selectedFile.value && (validationResult.value || excelAnalysis.value)))
-const currentCompareBackendLabel = computed(() => {
-  if (activeImageModelName.value) {
-    return t('excelExecution.compareBackendDinov2', { model: activeImageModelName.value })
-  }
-  return t('excelExecution.compareBackendOpenCv')
-})
-const shouldCollapseTopSelectors = computed(() => Boolean(
-  selectedFile.value
-  && (
-    activeImageModelName.value
-    || imageCompareBackendConfirmed.value
-    || (hasAnalyzedCurrentFile.value && isOpenCvCompareBackend.value)
-  )
-))
+const shouldCollapseTopSelectors = computed(() => Boolean(selectedFile.value && hasAnalyzedCurrentFile.value))
 const showCompactFileSelectorPanel = computed(() => shouldCollapseTopSelectors.value && !fileSelectorPanelExpanded.value)
-const showCompactModelSelectorPanel = computed(() => shouldCollapseTopSelectors.value && !modelSelectorPanelExpanded.value)
 const showCompactReportPanel = computed(() => !reportPanelExpanded.value)
 
 const buildReportOverviewMeta = (summary) => {
@@ -2406,6 +2378,27 @@ const imageReportRows = computed(() => {
 })
 
 const latestImageReport = computed(() => imageReportRows.value[0] || null)
+
+// 最新报告：圆环通过率
+const reportPassRate = computed(() => {
+  const summary = latestImageReport.value?.summary
+  if (!summary || !summary.total) {
+    return 0
+  }
+  return Math.round((summary.passed / summary.total) * 100)
+})
+const reportDonutTone = computed(() => {
+  const rate = reportPassRate.value
+  if (rate >= 100) return 'pass'
+  if (rate <= 0) return 'fail'
+  return 'warn'
+})
+const REPORT_DONUT_CIRCUMFERENCE = 2 * Math.PI * 34
+const reportDonutDash = computed(() => {
+  const filled = (REPORT_DONUT_CIRCUMFERENCE * reportPassRate.value) / 100
+  return `${filled} ${REPORT_DONUT_CIRCUMFERENCE - filled}`
+})
+
 const showBatchExecutionProgress = computed(() => batchExecutionState.active || batchExecutionState.total > 0)
 const batchExecutionPercent = computed(() => {
   if (batchExecutionState.total <= 0) {
@@ -2439,16 +2432,12 @@ const resetBatchExecutionState = () => {
 }
 
 const getBatchExecutionCaseTitle = (rowIndex) => {
-  const rowData = excelAnalysis.value?.valid_rows?.[rowIndex - 1]
+  const rowData = findRowByExcelRow(rowIndex)
   return rowData?.title || t('excelExecution.rowFallbackTitle', { row: rowIndex })
 }
 
 const expandFileSelectorPanel = () => {
   fileSelectorPanelExpanded.value = true
-}
-
-const expandModelSelectorPanel = () => {
-  modelSelectorPanelExpanded.value = true
 }
 
 const expandReportPanel = () => {
@@ -2459,36 +2448,21 @@ const collapseReportPanel = () => {
   reportPanelExpanded.value = false
 }
 
-watch(selectedFile, (nextFile, previousFile) => {
+watch(selectedFile, (nextFile) => {
   if (!nextFile) {
     fileSelectorPanelExpanded.value = false
-    return
-  }
-
-  if (activeImageModelName.value && nextFile !== previousFile) {
-    fileSelectorPanelExpanded.value = false
-  }
-})
-
-watch(activeImageModelName, (nextModel, previousModel) => {
-  if (!nextModel) {
-    modelSelectorPanelExpanded.value = false
-    return
-  }
-
-  imageCompareBackendConfirmed.value = true
-
-  if (selectedFile.value && nextModel !== previousModel) {
-    modelSelectorPanelExpanded.value = false
   }
 })
 
 // 加载当前设备
 onMounted(async () => {
-  await Promise.all([loadCurrentDevice(), loadExcelFiles(), loadImageModelStatus({ silent: true }), loadImageReports({ silent: true })])
+  await Promise.all([loadCurrentDevice(), loadExcelFiles(), loadImageReports({ silent: true })])
   await restoreExecutionState()
+  loadColorVerifyConfig()
   // 点击页面任意位置关闭结果弹窗
   document.addEventListener('click', closeResultPopover)
+  // 注册全局“停止执行”回调，供右上角进度卡片按钮调用
+  registerStopHandler('image', stopAllExecution)
 })
 
 // 加载当前设备（仅读取，不做自动选择/恢复，避免调用 /api/devices/list 等有副作用的接口干扰首页设备列表）
@@ -2513,153 +2487,6 @@ const loadExcelFiles = async () => {
     console.error('获取Excel文件列表失败:', error)
   } finally {
     loadingFiles.value = false
-  }
-}
-
-const loadImageModelStatus = async (options = {}) => {
-  const { silent = false } = options
-  loadingImageModelStatus.value = true
-  if (!silent) {
-    imageModelStatusError.value = ''
-  }
-
-  try {
-    const response = await fetch('/api/excel/image-models/status')
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.loadImageModelStatusFailed')))
-    }
-
-    const data = await response.json()
-    imageModelStatus.value = {
-      ...createEmptyImageModelStatus(),
-      ...data,
-      dependencies: {
-        ...createEmptyImageModelStatus().dependencies,
-        ...(data.dependencies || {})
-      },
-      recommended_model: {
-        ...createEmptyImageModelStatus().recommended_model,
-        ...(data.recommended_model || {})
-      }
-    }
-    if (!silent) {
-      imageModelMessage.value = ''
-    }
-  } catch (error) {
-    imageModelStatusError.value = error instanceof Error ? error.message : t('excelExecution.alerts.loadImageModelStatusFailed')
-  } finally {
-    loadingImageModelStatus.value = false
-  }
-}
-
-const downloadRecommendedImageModel = async () => {
-  downloadingImageModel.value = true
-  imageModelStatusError.value = ''
-  imageModelMessage.value = ''
-
-  try {
-    const payload = {
-      model_name: imageModelStatus.value?.recommended_model?.name || 'DINOv2-Base',
-      repo_id: imageModelStatus.value?.recommended_model?.repo_id || 'facebook/dinov2-base'
-    }
-    const response = await fetch('/api/excel/image-models/download', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
-
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.downloadImageModelFailed')))
-    }
-
-    const data = await response.json()
-    imageModelMessage.value = t('excelExecution.alerts.downloadImageModelSuccess', { model: data.model_name || payload.model_name })
-    await loadImageModelStatus({ silent: true })
-  } catch (error) {
-    imageModelStatusError.value = error instanceof Error ? error.message : t('excelExecution.alerts.downloadImageModelFailed')
-  } finally {
-    downloadingImageModel.value = false
-  }
-}
-
-const selectImageModel = async (modelName) => {
-  selectingImageModel.value = true
-  imageModelStatusError.value = ''
-  imageModelMessage.value = ''
-
-  try {
-    const response = await fetch('/api/excel/image-models/select', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ model_name: modelName })
-    })
-
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.selectImageModelFailed')))
-    }
-
-    await loadImageModelStatus({ silent: true })
-    imageCompareBackendConfirmed.value = true
-    imageModelMessage.value = t('excelExecution.alerts.selectImageModelSuccess', { model: modelName })
-  } catch (error) {
-    imageModelStatusError.value = error instanceof Error ? error.message : t('excelExecution.alerts.selectImageModelFailed')
-  } finally {
-    selectingImageModel.value = false
-  }
-}
-
-const clearSelectedImageModel = async () => {
-  clearingImageModelSelection.value = true
-  imageModelStatusError.value = ''
-  imageModelMessage.value = ''
-
-  try {
-    const response = await fetch('/api/excel/image-models/clear-selection', {
-      method: 'POST'
-    })
-
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.clearImageModelFailed')))
-    }
-
-    await loadImageModelStatus({ silent: true })
-    imageCompareBackendConfirmed.value = true
-    imageModelMessage.value = t('excelExecution.alerts.switchToOpenCvSuccess')
-  } catch (error) {
-    imageModelStatusError.value = error instanceof Error ? error.message : t('excelExecution.alerts.clearImageModelFailed')
-  } finally {
-    clearingImageModelSelection.value = false
-  }
-}
-
-const deleteImageModel = async (modelName) => {
-  if (!confirm(t('excelExecution.alerts.deleteImageModelConfirm', { model: modelName }))) {
-    return
-  }
-
-  deletingImageModel.value = true
-  imageModelStatusError.value = ''
-  imageModelMessage.value = ''
-
-  try {
-    const response = await fetch(`/api/excel/image-models?model_name=${encodeURIComponent(modelName)}`, {
-      method: 'DELETE'
-    })
-
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.deleteImageModelFailed')))
-    }
-
-    await loadImageModelStatus({ silent: true })
-    imageModelMessage.value = t('excelExecution.alerts.deleteImageModelSuccess', { model: modelName })
-  } catch (error) {
-    imageModelStatusError.value = error instanceof Error ? error.message : t('excelExecution.alerts.deleteImageModelFailed')
-  } finally {
-    deletingImageModel.value = false
   }
 }
 
@@ -2733,21 +2560,16 @@ const formatBatchScore = (score) => {
 const buildExcelBatchResultDetail = (message, score, compareEngine = '', modelName = '') => {
   const normalizedMessage = String(message || '').trim()
   const scoreText = formatBatchScore(Number(score))
-  const engineText = compareEngine === 'dinov2'
-    ? (modelName ? `DINOv2 ${modelName}` : 'DINOv2')
-    : ''
   if (normalizedMessage && scoreText && !normalizedMessage.includes(scoreText)) {
-    return engineText
-      ? `${normalizedMessage}（相似度 ${scoreText}） · ${engineText}`
-      : `${normalizedMessage}（相似度 ${scoreText}）`
+    return `${normalizedMessage}（相似度 ${scoreText}）`
   }
   if (normalizedMessage) {
-    return engineText ? `${normalizedMessage} · ${engineText}` : normalizedMessage
+    return normalizedMessage
   }
   if (scoreText) {
-    return engineText ? `相似度 ${scoreText} · ${engineText}` : `相似度 ${scoreText}`
+    return `相似度 ${scoreText}`
   }
-  return engineText
+  return ''
 }
 
 const normalizeCompareDetails = (value) => {
@@ -2777,7 +2599,7 @@ const getBatchReportTitle = () => {
 const buildExcelBatchReportRows = async (rowIndexes) => {
   const validRows = excelAnalysis.value?.valid_rows || []
   return Promise.all(rowIndexes.map(async (rowIndex) => {
-    const row = validRows[rowIndex - 1] || {}
+    const row = findRowByExcelRow(rowIndex) || {}
     const meta = rowResultMeta.value[rowIndex] || {}
     const status = meta.verify_result || (meta.status === 'error' ? 'ERROR' : 'UNKNOWN')
     const detail = meta.detail || meta.last_message || (
@@ -2787,17 +2609,7 @@ const buildExcelBatchReportRows = async (rowIndexes) => {
       status.toUpperCase() === 'NA' ? '不适用' :
       '未返回结果详情'
     )
-    const matchedEntry = row.verify_image ? getLocalVerifyImageEntry(row.verify_image) : null
-    let verifyImageDataUrl = ''
-
-    if (matchedEntry?.file) {
-      try {
-        verifyImageDataUrl = await readFileAsDataUrl(matchedEntry.file)
-      } catch (error) {
-        console.error('读取报告原图片快照失败:', error)
-      }
-    }
-
+    // 校验图不嵌入 base64：报告改用服务器 URL（/api/excel/verify_image）按需加载，避免体积膨胀
     // 收集该行的所有执行轮次
     const allRuns = rowAllResults.value[rowIndex] || []
     const runs = allRuns.length > 0 ? allRuns.map((r, i) => ({
@@ -2831,7 +2643,6 @@ const buildExcelBatchReportRows = async (rowIndexes) => {
       score: Number.isFinite(meta.score) ? meta.score : null,
       detail,
       verify_image: row.verify_image || '',
-      verify_image_data_url: verifyImageDataUrl,
       screenshot_url: meta.screenshot_url || rowScreenshots.value[rowIndex] || '',
       video_url: meta.video_url || '',
       compare_engine: meta.compare_engine || '',
@@ -2894,9 +2705,6 @@ const createExcelBatchReport = async (rowIndexes, label) => {
 // 选择文件
 const selectFile = (file) => {
   selectedFile.value = file
-  if (!activeImageModelName.value) {
-    imageCompareBackendConfirmed.value = false
-  }
   resetBatchExecutionState()
   excelAnalysis.value = null
   validationResult.value = null
@@ -2946,28 +2754,32 @@ const normalizeEditKeyMonitorSequence = (sequence) => {
 }
 
 const compressAdjacentEditCommands = (sequence) => {
-  // 把 KEY/N/D,KEY/M/D 合并为 KEY/(N+M)/D。带 "*" 占位延迟或非数字 count 的
-  // 段不做合并，避免破坏监听过程中的占位行。
+  // 把 KEY/N/D,KEY/M/D 合并为 KEY/(N+M)/D。带 "*" 占位延迟、非数字 count 或
+  // 随机次数 X/X:N 的段不做合并，避免破坏监听过程中的占位行与随机规格。
   const parts = String(sequence || '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
   const out = []
+  let lastIsRandom = false
   for (const part of parts) {
     const segs = part.split('/')
     if (segs.length < 3) {
       out.push(part)
+      lastIsRandom = false
       continue
     }
     const key = segs[0]
     const count = parseInt(segs[1], 10)
     const delay = segs[2]
-    if (delay === '*' || Number.isNaN(count)) {
+    const isRandom = /^[xX](?::\d+)?$/.test((segs[1] || '').trim())
+    if (delay === '*' || Number.isNaN(count) || isRandom) {
       out.push(part)
+      lastIsRandom = isRandom
       continue
     }
     const last = out.length > 0 ? out[out.length - 1] : null
-    if (last) {
+    if (last && !lastIsRandom) {
       const lastSegs = last.split('/')
       if (lastSegs.length >= 3 && lastSegs[0] === key && lastSegs[2] === delay) {
         const lastCount = parseInt(lastSegs[1], 10) || 1
@@ -2976,6 +2788,7 @@ const compressAdjacentEditCommands = (sequence) => {
       }
     }
     out.push(`${key}/${count || 1}/${delay}`)
+    lastIsRandom = false
   }
   return out.join(',')
 }
@@ -3120,6 +2933,7 @@ const onEditMappingSchemeChange = async (event) => {
 }
 
 const startEditKeyMonitor = async () => {
+  logEditAction('点击"开始监听"（按键监听）')
   startEditKeyMonitorStatusPolling()
   syncEditKeyMonitorSequence('')
   editKeyMonitorError.value = ''
@@ -3129,19 +2943,23 @@ const startEditKeyMonitor = async () => {
     const res = await fetch('/api/keymonitor/start', { method: 'POST' })
     if (res.ok) {
       editKeyMonitorActive.value = true
+      logEditAction('按键监听已启动')
       return
     }
 
     const data = await res.json().catch(() => ({}))
+    logEditAction('启动按键监听失败', { error: data?.detail })
     editKeyMonitorError.value = data?.detail || t('excelExecution.alerts.startEditMonitorFailed')
     editKeyMonitorStarting.value = false
   } catch {
+    logEditAction('启动按键监听失败')
     editKeyMonitorError.value = t('excelExecution.alerts.startEditMonitorFailed')
     editKeyMonitorStarting.value = false
   }
 }
 
 const stopEditKeyMonitor = async () => {
+  logEditAction('点击"停止监听"（按键监听）')
   try {
     const res = await fetch('/api/keymonitor/stop', { method: 'POST' })
     if (!res.ok) {
@@ -3153,7 +2971,9 @@ const stopEditKeyMonitor = async () => {
     editKeyMonitorActive.value = false
     editKeyMonitorStarting.value = false
     syncEditKeyMonitorSequence(data.sequence || '')
+    logEditAction('按键监听已停止', { 序列: data.sequence || '' })
   } catch (error) {
+    logEditAction('停止按键监听失败', { error: error.message })
     editKeyMonitorError.value = error.message || t('excelExecution.alerts.stopEditMonitorFailed')
   }
 }
@@ -3187,7 +3007,9 @@ const applyEditKeyMonitorSequenceToField = async () => {
     const currentValue = normalizeEditKeyMonitorSequence(editingCaseForm[targetField]).replace(/,+$/, '')
     const merged = currentValue ? `${currentValue},${sequence}` : sequence
     editingCaseForm[targetField] = compressAdjacentEditCommands(merged)
+    logEditAction('将监听序列应用到字段', { field: targetField, 序列: merged })
   } catch (error) {
+    logEditAction('应用监听序列失败', { error: error.message })
     editKeyMonitorError.value = error.message || t('excelExecution.alerts.applyEditMonitorFailed')
   }
 }
@@ -3236,12 +3058,16 @@ const resetEditKeyMonitorState = () => {
 // ───────────────────── 编辑模态：设备画面预览 + 框选保存 ─────────────────────
 
 const editDevicePreviewUsesCaptureCard = computed(() => editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_CAPTURE_CARD)
+const editDevicePreviewUsesScrcpy = computed(() => editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_SCRCPY)
 const editDevicePreviewIdentityLabel = computed(() => {
   if (editDevicePreviewLabel.value) {
     return editDevicePreviewLabel.value
   }
   if (editDevicePreviewUsesCaptureCard.value) {
     return t('excelExecution.devicePreviewCaptureCardLabel')
+  }
+  if (editDevicePreviewUsesScrcpy.value) {
+    return `scrcpy · ${selectedDevice.value || ''}`
   }
   return selectedDevice.value || ''
 })
@@ -3301,8 +3127,8 @@ const stopEditDevicePreviewTimer = () => {
 
 const startEditDevicePreviewTimer = () => {
   stopEditDevicePreviewTimer()
-  // 采集卡走 MJPEG 流，不需要轮询；ADB 才靠定时器拉单帧。
-  if (editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_CAPTURE_CARD) {
+  // 采集卡和 scrcpy 走 MJPEG 流，不需要轮询；ADB 才靠定时器拉单帧。
+  if (editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_CAPTURE_CARD || editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_SCRCPY) {
     return
   }
   editDevicePreviewTimer = setInterval(() => {
@@ -3333,6 +3159,22 @@ const loadEditDevicePreview = async ({ silent = false } = {}) => {
     editDevicePreviewLabel.value = t('excelExecution.devicePreviewCaptureCardLabel')
     if (!editDevicePreviewUrl.value || !editDevicePreviewUrl.value.startsWith('/api/devices/preview/stream')) {
       editDevicePreviewUrl.value = buildEditDevicePreviewStreamUrl()
+    }
+    editDevicePreviewError.value = ''
+    return
+  }
+  // scrcpy：同样走 MJPEG 流
+  if (editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_SCRCPY) {
+    if (!selectedDevice.value) {
+      editDevicePreviewError.value = t('excelExecution.alerts.devicePreviewRequiresDevice')
+      editDevicePreviewUrl.value = ''
+      editDevicePreviewLoading.value = false
+      return
+    }
+    editDevicePreviewLabel.value = `scrcpy · ${selectedDevice.value}`
+    const scrcpyStreamUrl = `/api/devices/preview/stream?source=scrcpy&stream=${editDevicePreviewStreamVersion.value}`
+    if (!editDevicePreviewUrl.value || !editDevicePreviewUrl.value.startsWith('/api/devices/preview/stream?source=scrcpy')) {
+      editDevicePreviewUrl.value = scrcpyStreamUrl
     }
     editDevicePreviewError.value = ''
     return
@@ -3376,12 +3218,19 @@ const loadEditDevicePreview = async ({ silent = false } = {}) => {
 }
 
 const handleEditDevicePreviewRefresh = () => {
+  logEditAction('点击"刷新设备画面预览"', { source: editDevicePreviewSource.value })
   resetEditDevicePreviewSelection()
   editDevicePreviewSaveMessage.value = ''
   if (editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_CAPTURE_CARD) {
     // 采集卡：换一个 stream 版本号让 <img> 重连流
     editDevicePreviewStreamVersion.value += 1
     editDevicePreviewUrl.value = buildEditDevicePreviewStreamUrl()
+    return
+  }
+  if (editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_SCRCPY) {
+    // scrcpy：换一个 stream 版本号让 <img> 重连流
+    editDevicePreviewStreamVersion.value += 1
+    editDevicePreviewUrl.value = `/api/devices/preview/stream?source=scrcpy&stream=${editDevicePreviewStreamVersion.value}`
     return
   }
   void loadEditDevicePreview()
@@ -3636,6 +3485,12 @@ const stopEditDevicePreview = () => {
   resetEditDevicePreviewSelection()
 }
 
+watch(screenshotSource, (next) => {
+  if (next === 'capture_card') {
+    void ensureExecCaptureCardDevicesLoaded()
+  }
+})
+
 watch(editDevicePreviewSource, (next, prev) => {
   if (!showCaseEditModal.value) return
   if (next === prev) return
@@ -3690,6 +3545,7 @@ const onEditCaptureCardDeviceSelectChange = async (event) => {
 }
 
 const switchEditCaptureCardDevice = async (deviceId) => {
+  logEditAction('切换采集卡设备', { device_id: Number(deviceId) })
   editCaptureCardSwitching.value = true
   editCaptureCardError.value = ''
   try {
@@ -3705,16 +3561,80 @@ const switchEditCaptureCardDevice = async (deviceId) => {
     if (data.active_device && Number.isInteger(data.active_device.device_id)) {
       editCaptureCardActiveDeviceId.value = data.active_device.device_id
     }
+    logEditAction('切换采集卡成功', { device_id: editCaptureCardActiveDeviceId.value })
     // 切换成功立即重新挂载流，避免显示上一台设备的最后一帧
     if (editDevicePreviewSource.value === EDIT_DEVICE_PREVIEW_SOURCE_CAPTURE_CARD) {
       editDevicePreviewStreamVersion.value += 1
       editDevicePreviewUrl.value = buildEditDevicePreviewStreamUrl()
     }
   } catch (error) {
+    logEditAction('切换采集卡失败', { error: error?.message })
     editCaptureCardError.value = error?.message || t('excelExecution.alerts.switchCaptureCardDeviceFailed')
   } finally {
     editCaptureCardSwitching.value = false
   }
+}
+
+// ───────────────────── 执行面板：采集卡设备选择 ─────────────────────
+
+const loadExecCaptureCardDevices = async () => {
+  execCaptureCardListLoading.value = true
+  execCaptureCardError.value = ''
+  try {
+    const response = await fetch('/api/devices/capture-card/devices')
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(data?.detail || t('excelExecution.alerts.loadCaptureCardDevicesFailed'))
+    }
+    execCaptureCardDevicesList.value = Array.isArray(data.devices) ? data.devices : []
+    if (data.active_device && Number.isInteger(data.active_device.device_id)) {
+      execCaptureCardActiveDeviceId.value = data.active_device.device_id
+    }
+    execCaptureCardListLoaded = true
+  } catch (error) {
+    execCaptureCardError.value = error?.message || t('excelExecution.alerts.loadCaptureCardDevicesFailed')
+  } finally {
+    execCaptureCardListLoading.value = false
+  }
+}
+
+const onExecCaptureCardDeviceSelectChange = async (event) => {
+  const next = Number(event?.target?.value)
+  if (!Number.isFinite(next) || next === execCaptureCardActiveDeviceId.value) {
+    return
+  }
+  await switchExecCaptureCardDevice(next)
+}
+
+const switchExecCaptureCardDevice = async (deviceId) => {
+  execCaptureCardSwitching.value = true
+  execCaptureCardError.value = ''
+  try {
+    const response = await fetch('/api/devices/capture-card/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: Number(deviceId) }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(data?.detail || t('excelExecution.alerts.switchCaptureCardDeviceFailed'))
+    }
+    if (data.active_device && Number.isInteger(data.active_device.device_id)) {
+      execCaptureCardActiveDeviceId.value = data.active_device.device_id
+    }
+    persistExecutionState()
+  } catch (error) {
+    execCaptureCardError.value = error?.message || t('excelExecution.alerts.switchCaptureCardDeviceFailed')
+  } finally {
+    execCaptureCardSwitching.value = false
+  }
+}
+
+const ensureExecCaptureCardDevicesLoaded = async () => {
+  if (execCaptureCardListLoaded || execCaptureCardListLoading.value) {
+    return
+  }
+  await loadExecCaptureCardDevices()
 }
 
 const stopAndResetEditKeyMonitor = async () => {
@@ -3728,6 +3648,47 @@ const stopAndResetEditKeyMonitor = async () => {
 
   resetEditKeyMonitorState()
 }
+
+// ───────────────────── 编辑弹窗：控制台操作日志 ─────────────────────
+// 在编辑用例弹窗中记录用户操作，便于联调时在控制台追踪用户行为。
+const logEditAction = (...args) => {
+  console.log('[编辑用例]', ...args)
+}
+
+// 表单字段变更防抖日志：停止输入 600ms 后输出一次"改了什么"
+let editFormLogTimer = null
+let lastEditFormSnapshot = null
+
+const resetEditFormLogSnapshot = () => {
+  lastEditFormSnapshot = { ...editingCaseForm }
+}
+
+const flushEditFormLog = () => {
+  if (!showCaseEditModal.value || !lastEditFormSnapshot) {
+    return
+  }
+  const changed = {}
+  for (const key of Object.keys(editingCaseForm)) {
+    if (editingCaseForm[key] !== lastEditFormSnapshot[key]) {
+      changed[key] = { 旧值: lastEditFormSnapshot[key], 新值: editingCaseForm[key] }
+    }
+  }
+  if (Object.keys(changed).length > 0) {
+    logEditAction('用户修改字段:', changed)
+  }
+  lastEditFormSnapshot = { ...editingCaseForm }
+}
+
+watch(
+  () => ({ ...editingCaseForm }),
+  () => {
+    if (!showCaseEditModal.value) {
+      return
+    }
+    clearTimeout(editFormLogTimer)
+    editFormLogTimer = setTimeout(flushEditFormLog, 600)
+  }
+)
 
 const openCaseEditModal = (item) => {
   editingCaseIndex.value = item.idx
@@ -3747,9 +3708,24 @@ const openCaseEditModal = (item) => {
   startEditKeyMonitorStatusPolling()
   loadEditKeyMonitorMappings()
   startEditDevicePreview()
+  // 控制台日志：打开编辑弹窗（含初始字段值）
+  logEditAction('打开编辑弹窗', {
+    excel_row: editingCaseExcelRow.value,
+    idx: editingCaseIndex.value,
+    title: editingCaseForm.title,
+    ori_step: editingCaseForm.ori_step,
+    pre_script: editingCaseForm.pre_script,
+    verify_image: editingCaseForm.verify_image,
+    test_result: editingCaseForm.test_result,
+  })
+  resetEditFormLogSnapshot()
 }
 
-const closeCaseEditModal = () => {
+const closeCaseEditModal = (saved = false) => {
+  logEditAction(saved ? '关闭编辑弹窗（保存成功）' : '关闭编辑弹窗（未保存/取消）', {
+    excel_row: editingCaseExcelRow.value,
+    title: editingCaseForm.title,
+  })
   showCaseEditModal.value = false
   editingCaseIndex.value = null
   editingCaseExcelRow.value = null
@@ -3762,6 +3738,31 @@ const closeCaseEditModal = () => {
   editCaseStepsError.value = ''
   void stopAndResetEditKeyMonitor()
   stopEditDevicePreview()
+  lastEditFormSnapshot = null
+}
+
+const showInvalidKeysToast = (invalidKeys) => {
+  if (invalidKeysToastTimer) {
+    clearTimeout(invalidKeysToastTimer)
+  }
+  const keysList = invalidKeys.map(item => item.key)
+  invalidKeysToast.value = { keys: keysList, items: invalidKeys }
+  invalidKeysToastTimer = setTimeout(() => {
+    invalidKeysToast.value = null
+  }, 8000)
+}
+
+const dismissInvalidKeysToast = () => {
+  invalidKeysToast.value = null
+  if (invalidKeysToastTimer) {
+    clearTimeout(invalidKeysToastTimer)
+    invalidKeysToastTimer = null
+  }
+}
+
+const goToCustomization = () => {
+  dismissInvalidKeysToast()
+  router.push('/customization')
 }
 
 // "执行步骤" 按钮：把 ori_step + pre_script 直接发给设备执行，不截图、不做图像比对
@@ -3790,6 +3791,10 @@ const executeEditCaseSteps = async () => {
   }
 
   const commandsText = editCaseStepsExecutableCommands.value.join(',')
+  logEditAction('点击"执行步骤"，向设备发送命令', {
+    命令条数: editCaseStepsExecutableCommands.value.length,
+    commands: commandsText,
+  })
   executingEditCaseSteps.value = true
   editCaseStepsError.value = ''
   editCaseStepsMessage.value = ''
@@ -3805,6 +3810,7 @@ const executeEditCaseSteps = async () => {
       throw new Error(data?.detail || t('excelExecution.alerts.executeCaseStepsFailed'))
     }
     const failed = (Array.isArray(data?.results) ? data.results : []).filter((item) => item.status === 'error')
+    logEditAction('执行步骤完成', { 失败条数: failed.length })
     if (failed.length > 0) {
       editCaseStepsError.value = failed.map((item) => item.message).join('；')
     } else {
@@ -3814,6 +3820,7 @@ const executeEditCaseSteps = async () => {
       })
     }
   } catch (error) {
+    logEditAction('执行步骤失败', { error: error?.message })
     editCaseStepsError.value = error?.message || t('excelExecution.alerts.executeCaseStepsFailed')
   } finally {
     executingEditCaseSteps.value = false
@@ -3826,6 +3833,18 @@ const saveCaseFields = async () => {
   }
 
   savingCaseFields.value = true
+  // 控制台日志：提交保存
+  logEditAction('点击"保存"，提交字段', {
+    file_name: selectedFile.value,
+    excel_row: editingCaseExcelRow.value,
+    payload: {
+      title: editingCaseForm.title,
+      ori_step: editingCaseForm.ori_step,
+      pre_script: editingCaseForm.pre_script,
+      verify_image: editingCaseForm.verify_image,
+      test_result: editingCaseForm.test_result,
+    },
+  })
   try {
     const response = await fetch('/api/excel/update_case_fields', {
       method: 'POST',
@@ -3848,7 +3867,16 @@ const saveCaseFields = async () => {
       throw new Error(await readErrorMessage(response, t('excelExecution.alerts.updateCaseFailedSimple')))
     }
 
-    const rowData = excelAnalysis.value?.valid_rows?.[editingCaseIndex.value - 1]
+    const result = await response.json().catch(() => ({}))
+    logEditAction('保存成功', {
+      excel_row: editingCaseExcelRow.value,
+      invalid_keys: Array.isArray(result.invalid_keys) ? result.invalid_keys.length : 0,
+    })
+    if (result.invalid_keys && result.invalid_keys.length > 0) {
+      showInvalidKeysToast(result.invalid_keys)
+    }
+
+    const rowData = findRowByExcelRow(editingCaseIndex.value)
     if (rowData) {
       const nextCommands = [
         ...normalizeCommandList(editingCaseForm.ori_step),
@@ -3871,10 +3899,11 @@ const saveCaseFields = async () => {
       rowData.test_result = editingCaseForm.test_result
     }
 
-    closeCaseEditModal()
+    closeCaseEditModal(true)
   } catch (error) {
+    logEditAction('保存失败', { excel_row: editingCaseExcelRow.value, error: error.message })
     console.error('更新用例字段失败:', error)
-    alert(t('excelExecution.alerts.updateCaseFailed', { detail: error.message }))
+    await alert(t('excelExecution.alerts.updateCaseFailed', { detail: error.message }))
   } finally {
     savingCaseFields.value = false
   }
@@ -4089,7 +4118,7 @@ const updateRowExecutionProgress = (rowIndex, message) => {
     return
   }
 
-  const rowData = excelAnalysis.value?.valid_rows?.[rowIndex - 1]
+  const rowData = findRowByExcelRow(rowIndex)
   if (!rowData) {
     return
   }
@@ -4238,7 +4267,7 @@ const closeScreenshotModal = () => {
 }
 
 const openExecutionResultModal = (rowIndex, matchedEntry = null) => {
-  const rowData = excelAnalysis.value?.valid_rows?.[rowIndex - 1]
+  const rowData = findRowByExcelRow(rowIndex)
   const meta = rowResultMeta.value[rowIndex] || {}
   if (!rowData || (!rowScreenshots.value[rowIndex] && !meta.video_url)) {
     return
@@ -4375,7 +4404,7 @@ const analyzeFile = async (options = {}) => {
   const { silent = false, resetView = true } = options
   if (!selectedFile.value) {
     if (!silent) {
-      alert(t('excelExecution.alerts.selectFileFirst'))
+      await alert(t('excelExecution.alerts.selectFileFirst'))
     }
     return
   }
@@ -4412,20 +4441,15 @@ const analyzeFile = async (options = {}) => {
       selectedRows.value = []
     }
 
-    if (isOpenCvCompareBackend.value) {
-      imageCompareBackendConfirmed.value = true
-    }
-
-    if (selectedFile.value && (activeImageModelName.value || isOpenCvCompareBackend.value)) {
+    if (selectedFile.value) {
       fileSelectorPanelExpanded.value = false
-      modelSelectorPanelExpanded.value = false
     }
 
     applyRowResultMetaToAnalysis()
   } catch (error) {
     console.error('分析文件失败:', error)
     if (!silent) {
-      alert(t('excelExecution.alerts.analyzeFailedWithDetail', { detail: error.message }))
+      await alert(t('excelExecution.alerts.analyzeFailedWithDetail', { detail: error.message }))
     }
   } finally {
     loadingAnalysis.value = false
@@ -4462,17 +4486,6 @@ const readFileAsBase64 = async (file, cacheKey) => {
   return base64
 }
 
-const readFileAsDataUrl = (file) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      resolve(typeof reader.result === 'string' ? reader.result : '')
-    }
-    reader.onerror = () => reject(new Error(t('excelExecution.alerts.readVerifyImageFailed')))
-    reader.readAsDataURL(file)
-  })
-}
-
 const buildExecutionPayload = async (index) => {
   const payload = {
     file_name: selectedFile.value,
@@ -4488,7 +4501,7 @@ const buildExecutionPayload = async (index) => {
     return payload
   }
 
-  const rowData = excelAnalysis.value?.valid_rows?.[index - 1]
+  const rowData = findRowByExcelRow(index)
   const verifyImageRaw = String(rowData?.verify_image || '').trim()
   if (!verifyImageRaw) {
     return payload
@@ -4536,6 +4549,21 @@ const buildExecutionPayload = async (index) => {
 // ===== 循环执行 =====
 const loopStopFlags = ref({})
 
+// 将单条执行结果投影到全局进度 store（图片模块）
+const finalizeImageRow = (index) => {
+  const verify = rowResultMeta.value[index]?.verify_result
+  recordRowResult({ passed: verify === 'PASS' })
+}
+
+// 互斥兜底：其它模块执行中时不允许启动图片执行
+const assertImageExecutionSlot = () => {
+  if (isExecutionRunning.value && executionState.activeType !== 'image') {
+    alert(t('excelExecution.alerts.otherModuleRunning'))
+    return false
+  }
+  return true
+}
+
 const runLoopExecution = async (index) => {
   const isFiniteLoop = loopType.value === 'finite'
   const total = isFiniteLoop ? Math.max(1, Math.floor(loopCount.value || 1)) : Infinity
@@ -4546,7 +4574,7 @@ const runLoopExecution = async (index) => {
   executionResults.value = []
   rowAllResults.value[index] = []
 
-  const rowData = excelAnalysis.value?.valid_rows?.[index - 1]
+  const rowData = findRowByExcelRow(index)
   const title = rowData?.title || `第 ${index} 行`
 
   executionResults.value.push(buildRowExecutionLogEntry(index, {
@@ -4555,6 +4583,12 @@ const runLoopExecution = async (index) => {
       ? (t('excelExecution.loopStartFinite', { title, count: total }) || `开始有限循环执行：${title}，共 ${total} 轮`)
       : (t('excelExecution.loopStartInfinite', { title }) || `开始无限循环执行：${title}`)
   }))
+
+  // 投影到全局进度卡片（无限循环时 total<=0 表示“不限”）
+  if (!beginExecution({ type: 'image', total: isFiniteLoop ? total : 0, label: title })) {
+    clearRowExecutionProgress(index)
+    return
+  }
 
   while (current < total) {
     if (loopStopFlags.value[index] || stopExecutionFlags.value[index]) {
@@ -4569,6 +4603,7 @@ const runLoopExecution = async (index) => {
     updateRowExecutionProgress(index, progressMsg)
 
     await runSingleExecutionOnce(index)
+    finalizeImageRow(index)
 
     if (loopStopFlags.value[index] || stopExecutionFlags.value[index]) {
       stopped = true
@@ -4589,6 +4624,7 @@ const runLoopExecution = async (index) => {
     message: finalMsg
   }))
   clearRowExecutionProgress(index)
+  finishExecutionStore({ completed: !stopped })
 }
 
 // 单次执行核心（不含循环包装），返回 Promise
@@ -4746,7 +4782,7 @@ const runSingleExecutionOnce = (index) => {
                       if (eventRecord.screenshot_url) {
                         rowScreenshots.value[index] = eventRecord.screenshot_url
                       }
-                      const rowData = excelAnalysis.value.valid_rows[index - 1]
+                      const rowData = findRowByExcelRow(index)
                       if (rowData) {
                         rowData.result = eventRecord.verify_result
                         rowData.test_result = eventRecord.verify_result
@@ -4790,7 +4826,7 @@ const runSingleExecutionOnce = (index) => {
                             : normalizeCompareDetails(previousMeta.compare_details),
                           detail: buildExcelBatchResultDetail(eventRecord.message, eventRecord.score, eventRecord.compare_engine, eventRecord.model_name)
                         }
-                        const rowData = excelAnalysis.value.valid_rows[index - 1]
+                        const rowData = findRowByExcelRow(index)
                         if (rowData) {
                           rowData.result = eventRecord.verify_result
                           rowData.test_result = eventRecord.verify_result
@@ -4843,12 +4879,12 @@ const executeExcelRowByIndex = (index) => {
   if (executionMode.value === 'loop_row') {
     return new Promise(async (resolve) => {
       if (!selectedDevice.value) {
-        alert(t('common.deviceRequired'))
+        await alert(t('common.deviceRequired'))
         resolve()
         return
       }
       if (!selectedFile.value) {
-        alert(t('excelExecution.alerts.selectFileFirst'))
+        await alert(t('excelExecution.alerts.selectFileFirst'))
         resolve()
         return
       }
@@ -4856,8 +4892,12 @@ const executeExcelRowByIndex = (index) => {
         const action = await showVerifyFolderAlert()
         if (action === 'select') { resolve(); return }
       }
-      if (!index || index < 1 || index > excelAnalysis.value.valid_rows.length) {
-        alert(t('excelExecution.alerts.invalidRow'))
+      if (!index || !findRowByExcelRow(index)) {
+        await alert(t('excelExecution.alerts.invalidRow'))
+        resolve()
+        return
+      }
+      if (!assertImageExecutionSlot()) {
         resolve()
         return
       }
@@ -4870,13 +4910,13 @@ const executeExcelRowByIndex = (index) => {
 
   return new Promise(async (resolve) => {
     if (!selectedDevice.value) {
-      alert(t('common.deviceRequired'))
+      await alert(t('common.deviceRequired'))
       resolve()
       return
     }
 
     if (!selectedFile.value) {
-      alert(t('excelExecution.alerts.selectFileFirst'))
+      await alert(t('excelExecution.alerts.selectFileFirst'))
       resolve()
       return
     }
@@ -4886,14 +4926,26 @@ const executeExcelRowByIndex = (index) => {
       if (action === 'select') { resolve(); return }
     }
 
-    if (!index || index < 1 || index > excelAnalysis.value.valid_rows.length) {
-      alert(t('excelExecution.alerts.invalidRow'))
+    if (!index || !findRowByExcelRow(index)) {
+      await alert(t('excelExecution.alerts.invalidRow'))
+      resolve()
+      return
+    }
+
+    if (!assertImageExecutionSlot()) {
       resolve()
       return
     }
 
     if (!isBatchExecuting.value && batchExecutionState.total > 0) {
       resetBatchExecutionState()
+    }
+
+    const singleRowData = findRowByExcelRow(index)
+    const singleTitle = singleRowData?.title || `第 ${index} 行`
+    if (!beginExecution({ type: 'image', total: 1, label: singleTitle })) {
+      resolve()
+      return
     }
 
     executingRows.value[index] = true
@@ -4921,6 +4973,8 @@ const executeExcelRowByIndex = (index) => {
     }
 
     const finishExecution = () => {
+      finalizeImageRow(index)
+      finishExecutionStore({ completed: !stopReported })
       executingRows.value[index] = false
       clearRowExecutionProgress(index)
       clearExecutionAbortController(index)
@@ -5034,7 +5088,7 @@ const executeExcelRowByIndex = (index) => {
                       if (eventRecord.screenshot_url) {
                         rowScreenshots.value[index] = eventRecord.screenshot_url
                       }
-                      const rowData = excelAnalysis.value.valid_rows[index - 1]
+                      const rowData = findRowByExcelRow(index)
                       if (rowData) {
                         rowData.result = eventRecord.verify_result
                         rowData.test_result = eventRecord.verify_result
@@ -5078,7 +5132,7 @@ const executeExcelRowByIndex = (index) => {
                             : normalizeCompareDetails(previousMeta.compare_details),
                           detail: buildExcelBatchResultDetail(eventRecord.message, eventRecord.score, eventRecord.compare_engine, eventRecord.model_name)
                         }
-                        const rowData = excelAnalysis.value.valid_rows[index - 1]
+                        const rowData = findRowByExcelRow(index)
                         if (rowData) {
                           rowData.result = eventRecord.verify_result
                           rowData.test_result = eventRecord.verify_result
@@ -5178,7 +5232,7 @@ const setResultValue = async (idx, value) => {
   closeResultPopover()
   if (!selectedFile.value) return
 
-  const rowData = excelAnalysis.value?.valid_rows?.[idx - 1]
+  const rowData = findRowByExcelRow(idx)
   if (!rowData) return
 
   const excelRow = rowData.row
@@ -5206,13 +5260,13 @@ const setResultValue = async (idx, value) => {
     rowData.test_result = value
   } catch (error) {
     console.error('切换执行结果失败:', error)
-    alert('写入结果失败: ' + (error?.message || '未知错误'))
+    await alert('写入结果失败: ' + (error?.message || '未知错误'))
   }
 }
 
 // 显示执行结果
 const showExecutionResult = (rowIndex) => {
-  const rowData = excelAnalysis.value?.valid_rows?.[rowIndex - 1]
+  const rowData = findRowByExcelRow(rowIndex)
   const meta = rowResultMeta.value[rowIndex]
   if ((!rowScreenshots.value[rowIndex] && !meta?.video_url) || !rowData) {
     return
@@ -5356,7 +5410,7 @@ const cropAndSaveRegion = async () => {
 
   canvas.toBlob(async (blob) => {
     if (!blob) {
-      alert('截图裁剪失败')
+      await alert('截图裁剪失败')
       return
     }
     await saveBlobToFile(blob, screenshotSaveFileName.value || 'screenshot_crop')
@@ -5367,14 +5421,14 @@ const cropAndSaveRegion = async () => {
 const directSaveScreenshot = async () => {
   const img = screenshotImgRef.value
   if (!img) {
-    alert('暂无截图可保存')
+    await alert('暂无截图可保存')
     return
   }
 
   const naturalW = img.naturalWidth
   const naturalH = img.naturalHeight
   if (!naturalW || !naturalH) {
-    alert('截图未加载完成')
+    await alert('截图未加载完成')
     return
   }
 
@@ -5386,7 +5440,7 @@ const directSaveScreenshot = async () => {
 
   canvas.toBlob(async (blob) => {
     if (!blob) {
-      alert('截图保存失败')
+      await alert('截图保存失败')
       return
     }
     await saveBlobToFile(blob, screenshotSaveFileName.value || 'screenshot')
@@ -5484,6 +5538,7 @@ const previewVerifyImage = (imageName) => {
     .map((s) => s.split(/[/\\]/).pop())
 
   if (candidates.length === 0) return
+  logEditAction('点击"预览校验图片"', { image_name: imageName, 张数: candidates.length })
 
   // 单张：保持老逻辑（包括 fallback 到选文件夹）
   if (candidates.length === 1) {
@@ -5562,6 +5617,90 @@ const toggleSelectAll = () => {
 }
 
 // 批量执行选中的行
+// 新增用例：写入占位命令 OK/1/1 使新行在列表可见，之后可用编辑弹窗填写
+const addNewCase = async () => {
+  if (!selectedFile.value) {
+    await alert(t('excelExecution.alerts.selectFileFirst'))
+    return
+  }
+  const title = await prompt(t('excelExecution.alerts.newCaseTitlePrompt')) || ''
+  try {
+    const response = await fetch('/api/excel/add_case', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_name: selectedFile.value, title })
+    })
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.addCaseFailed')))
+    }
+    const data = await response.json().catch(() => ({}))
+    console.log('[新增用例] 已新增:', data)
+    await analyzeFile({ silent: true })
+  } catch (error) {
+    console.error('新增用例失败:', error)
+    await alert(t('excelExecution.alerts.addCaseFailed', { detail: error.message }))
+  }
+}
+
+// 删除单个用例
+const deleteCase = async (item) => {
+  if (isBatchExecuting.value || executingRows.value[item.idx]) {
+    return
+  }
+  if (!await confirm(t('excelExecution.alerts.deleteCaseConfirm'))) {
+    return
+  }
+  const excelRow = item.row.row
+  try {
+    const response = await fetch('/api/excel/delete_cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_name: selectedFile.value, excel_rows: [excelRow] })
+    })
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.deleteCaseFailed')))
+    }
+    console.log('[删除用例] 已删除行:', excelRow)
+    selectedRows.value = selectedRows.value.filter((r) => r !== item.idx)
+    await analyzeFile({ silent: true })
+  } catch (error) {
+    console.error('删除用例失败:', error)
+    await alert(t('excelExecution.alerts.deleteCaseFailed', { detail: error.message }))
+  }
+}
+
+// 批量删除选中的用例
+const deleteSelectedCases = async () => {
+  if (selectedRows.value.length === 0) {
+    return
+  }
+  if (!await confirm(t('excelExecution.alerts.deleteSelectedConfirm', { count: selectedRows.value.length }))) {
+    return
+  }
+  const excelRows = selectedRows.value
+    .map((idx) => findRowByExcelRow(idx)?.row)
+    .filter((r) => r)
+  if (excelRows.length === 0) {
+    return
+  }
+  try {
+    const response = await fetch('/api/excel/delete_cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_name: selectedFile.value, excel_rows: excelRows })
+    })
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('excelExecution.alerts.deleteCaseFailed')))
+    }
+    console.log('[批量删除] 已删除:', excelRows)
+    selectedRows.value = []
+    await analyzeFile({ silent: true })
+  } catch (error) {
+    console.error('批量删除失败:', error)
+    await alert(t('excelExecution.alerts.deleteCaseFailed', { detail: error.message }))
+  }
+}
+
 const executeSelectedRows = async () => {
   if (enableVerification.value && !verifyImageFolderName.value) {
     const action = await showVerifyFolderAlert()
@@ -5587,6 +5726,18 @@ const executeBatchRows = async (rowIndexes, label) => {
   const isListLoop = executionMode.value === 'loop_list'
   const isFiniteLoop = loopType.value === 'finite'
   const totalRounds = isListLoop ? (isFiniteLoop ? Math.max(1, Math.floor(loopCount.value || 1)) : Infinity) : 1
+
+  if (!assertImageExecutionSlot()) {
+    return
+  }
+
+  // 投影到全局进度卡片：批量行数（列表循环为 行数×轮数，无限循环时 total<=0 表示“不限”）
+  const batchTotal = isListLoop
+    ? (isFiniteLoop ? ordered.length * Math.max(1, Math.floor(loopCount.value || 1)) : 0)
+    : ordered.length
+  if (!beginExecution({ type: 'image', total: batchTotal, label })) {
+    return
+  }
 
   batchExecutionState.active = true
   batchExecutionState.status = 'running'
@@ -5632,6 +5783,7 @@ const executeBatchRows = async (rowIndexes, label) => {
         batchExecutionState.currentRowIndex = rowIndex
         batchExecutionState.currentCaseTitle = getBatchExecutionCaseTitle(rowIndex)
         await runSingleExecutionOnce(rowIndex)
+        finalizeImageRow(rowIndex)
         batchExecutionState.completed = Math.min(offset + 1, ordered.length)
         if (!isBatchExecuting.value) break
 
@@ -5679,6 +5831,7 @@ const executeBatchRows = async (rowIndexes, label) => {
         })
       }
     }
+    finishExecutionStore({ completed: completedAll })
   }
 }
 
@@ -5760,7 +5913,7 @@ watch(currentPage, (newPage) => {
 })
 
 watch(
-  [selectedDevice, selectedFile, imageCompareBackendConfirmed, rowIndex, filterResult, searchKeyword, currentPage, jumpPage, pageSize, selectedRows, executionResults, rowScreenshots, rowResultMeta, verifyImageFolderName, verifyImageFileCount, matchThreshold, screenshotSource, executionMode, loopType, loopCount],
+  [selectedDevice, selectedFile, rowIndex, filterResult, searchKeyword, currentPage, jumpPage, pageSize, selectedRows, executionResults, rowScreenshots, rowResultMeta, verifyImageFolderName, verifyImageFileCount, matchThreshold, screenshotSource, executionMode, loopType, loopCount],
   () => {
     persistExecutionState()
   },
@@ -5803,14 +5956,14 @@ const uploadFile = async (event) => {
     }
     
     const data = await response.json()
-    alert(t('excelExecution.alerts.uploadSuccess', { filename: data.filename }))
+    await alert(t('excelExecution.alerts.uploadSuccess', { filename: data.filename }))
     // 刷新文件列表
     await loadExcelFiles()
     // 选择上传的文件
     selectFile(data.filename)
   } catch (error) {
     console.error('上传文件失败:', error)
-    alert(t('excelExecution.alerts.uploadFailedWithDetail', { detail: error.message }))
+    await alert(t('excelExecution.alerts.uploadFailedWithDetail', { detail: error.message }))
   } finally {
     // 重置文件输入
     if (fileInput.value) {
@@ -5822,7 +5975,7 @@ const uploadFile = async (event) => {
 // 删除文件
 const executing = ref(false)
 const deleteFile = async (file) => {
-  if (confirm(t('excelExecution.alerts.deleteConfirm', { file }))) {
+  if (await confirm(t('excelExecution.alerts.deleteConfirm', { file }))) {
     executing.value = true
     try {
       const response = await fetch(`/api/excel/delete?file_name=${encodeURIComponent(file)}`, {
@@ -5834,7 +5987,7 @@ const deleteFile = async (file) => {
       }
       
       const data = await response.json()
-      alert(data.message || t('excelExecution.alerts.deleteSuccess', { file }))
+      await alert(data.message || t('excelExecution.alerts.deleteSuccess', { file }))
       
       // 刷新文件列表
       await loadExcelFiles()
@@ -5853,7 +6006,7 @@ const deleteFile = async (file) => {
       }
     } catch (error) {
       console.error('删除文件失败:', error)
-      alert(t('excelExecution.alerts.deleteFailedWithDetail', { detail: error.message }))
+      await alert(t('excelExecution.alerts.deleteFailedWithDetail', { detail: error.message }))
     } finally {
       executing.value = false
     }
@@ -6064,6 +6217,62 @@ const deleteFile = async (file) => {
   border-radius: 22px;
 }
 
+/* 标题右侧走马灯提示：轮播 10 次后自动消失（animationend 触发隐藏） */
+.notice-marquee {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 12px;
+  border-radius: 9999px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 14px 32px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.notice-marquee-icon {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.notice-marquee-viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+
+.notice-marquee-track {
+  display: inline-block;
+  white-space: nowrap;
+  padding-left: 100%;
+  will-change: transform;
+  animation: notice-marquee-scroll 8s linear 10 forwards;
+}
+
+.notice-marquee-track span {
+  display: inline-block;
+  padding-right: 3rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: #475569;
+}
+
+@keyframes notice-marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
 .excel-top-model-panel {
   min-height: 100%;
 }
@@ -6158,6 +6367,138 @@ const deleteFile = async (file) => {
   background: rgba(248, 250, 252, 0.96);
   border: 1px solid rgba(226, 232, 240, 0.92);
   padding: 5px 10px;
+}
+
+/* ── 顶部整合卡片（选择Excel + 报告） ── */
+.excel-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 0;
+}
+
+.excel-overview-cell {
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.excel-overview-cell--report {
+  border-left: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+.excel-overview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.excel-overview-title {
+  margin: 6px 0 0;
+  color: #2c3e50;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.excel-overview-meta {
+  margin: 6px 0 0;
+  color: #6e6e73;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* ── 通过率圆环 ── */
+.excel-report-donut {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+}
+
+.excel-report-donut-svg {
+  width: 84px;
+  height: 84px;
+  transform: rotate(-90deg);
+}
+
+.excel-report-donut-track {
+  fill: none;
+  stroke: #eef1f5;
+  stroke-width: 8;
+}
+
+.excel-report-donut-bar {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.4s ease, stroke 0.3s ease;
+}
+
+.excel-report-donut-bar--pass {
+  stroke: #52c41a;
+}
+
+.excel-report-donut-bar--warn {
+  stroke: #fa8c16;
+}
+
+.excel-report-donut-bar--fail {
+  stroke: #f5222d;
+}
+
+.excel-report-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.excel-report-donut-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #2c3e50;
+  line-height: 1;
+}
+
+.excel-report-donut-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #6e6e73;
+}
+
+.excel-report-metric {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.excel-report-metric--pass {
+  background: #e8f7ee;
+  border: 1px solid rgba(31, 157, 85, 0.25);
+  color: #1f9d55;
+}
+
+.excel-report-metric--fail {
+  background: #fdecec;
+  border: 1px solid rgba(209, 67, 67, 0.25);
+  color: #d14343;
+}
+
+@media (max-width: 1200px) {
+  .excel-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-overview-cell--report {
+    border-left: none;
+    border-top: 1px solid rgba(226, 232, 240, 0.7);
+  }
 }
 
 .excel-report-actions {
@@ -6440,4 +6781,49 @@ const deleteFile = async (file) => {
 .vfa-fade-leave-to .excel-vfa-card {
   transform: scale(0.95);
 }
+
+.invalid-keys-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9000;
+  background: #fff;
+  border: 1px solid #fde68a;
+  border-radius: 16px;
+  padding: 18px 20px;
+  width: 340px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+}
+.toast-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.toast-icon { font-size: 1.2rem; }
+.toast-title { font-weight: 700; font-size: 0.92rem; flex: 1; }
+.toast-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 1.3rem; color: #94a3b8; line-height: 1; padding: 0 2px;
+}
+.toast-close:hover { color: #475569; }
+.toast-body { font-size: 0.82rem; color: #64748b; margin: 0 0 10px; line-height: 1.5; }
+.toast-keys { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.toast-key-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  color: #92400e;
+}
+.toast-actions { display: flex; gap: 8px; }
+
+.toast-slide-enter-active { transition: all 0.3s ease-out; }
+.toast-slide-leave-active { transition: all 0.25s ease-in; }
+.toast-slide-enter-from { opacity: 0; transform: translateY(20px) scale(0.95); }
+.toast-slide-leave-to { opacity: 0; transform: translateY(10px) scale(0.97); }
 </style>

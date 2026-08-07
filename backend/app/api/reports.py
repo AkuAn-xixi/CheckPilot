@@ -15,6 +15,10 @@ class ReportCreateRequest(BaseModel):
     kind: str = Field(default="custom", min_length=1)
 
 
+class ReportBatchDeleteRequest(BaseModel):
+    report_ids: list[str] = Field(default_factory=list)
+
+
 class AsrBatchCaseResult(BaseModel):
     row_index: int = Field(..., ge=1)
     case_title: str = Field(default="")
@@ -137,6 +141,15 @@ def delete_report(report_id: str):
     return _success({
         "deleted_report": deleted_report,
     })
+
+
+@router.post("/delete-batch")
+def delete_reports(payload: ReportBatchDeleteRequest):
+    if not payload.report_ids:
+        raise HTTPException(status_code=400, detail="没有选择要删除的报告")
+
+    results = report_service.delete_reports(payload.report_ids)
+    return _success(results)
 
 
 @router.post("")

@@ -619,12 +619,23 @@ class ReportService:
             raise ReportNotFoundError(f"未找到报告: {report_id}")
 
         title = report_id
+        associated_files: list[Path] = []
         try:
             payload = self._read_payload(file_path)
             title = self._normalize_title(str(payload.get("title") or report_id))
+            # 收集报告中引用的录音、识别文本、比对结果等文件
+            for section in payload.get("sections", []):
+                for row in section.get("rows", []):
+                    if not isinstance(row, dict):
+                        continue
+                    for key in ("audio_path", "transcript_path", "compare_result_path"):
+                        p = str(row.get(key) or "").strip()
+                        if p:
+                            associated_files.append(Path(p))
         except ValueError:
             title = report_id
 
+        # 删除报告文件
         try:
             file_path.unlink()
         except FileNotFoundError as exc:
@@ -632,11 +643,36 @@ class ReportService:
         except OSError as exc:
             raise ValueError(f"删除报告失败: {file_path}") from exc
 
+        # 删除关联的录音/识别/比对文件
+        deleted_files = []
+        for f in associated_files:
+            try:
+                if f.exists():
+                    f.unlink()
+                    deleted_files.append(str(f))
+            except OSError:
+                pass
+
         return {
             "report_id": report_id,
             "title": title,
             "file_path": str(file_path),
+            "deleted_files": deleted_files,
         }
+
+    def delete_reports(self, report_ids: list[str]) -> dict[str, Any]:
+        """批量删除报告：逐个尽力删除（含关联文件），单个失败不中断，返回成功/失败清单。"""
+        deleted: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+        for report_id in report_ids:
+            normalized = str(report_id or "").strip()
+            if not normalized:
+                continue
+            try:
+                deleted.append(self.delete_report(normalized))
+            except (ReportNotFoundError, ValueError) as exc:
+                failed.append({"report_id": normalized, "detail": str(exc)})
+        return {"deleted": deleted, "failed": failed}
 
     def get_overview(self) -> dict[str, Any]:
         reports = self.list_reports()
@@ -1046,7 +1082,9 @@ class ReportService:
                     f'<h3>{escape(item["title"])}</h3>'
                     + (f'<p>{escape(item["caption"])}</p>' if item["caption"] else '')
                     + (
-                        f'<img class="report-case-image" src="{escape(item["url"])}" alt="{escape(item["title"])}">'
+                        # 图片按需加载：报告只存 URL 不嵌 base64，懒加载避免打开时一次性拉取全部图片；
+                        # onerror 兜底隐藏加载失败的裂图（如图片仅存在于本地文件夹时）
+                        f'<img class="report-case-image" src="{escape(item["url"])}" alt="{escape(item["title"])}" loading="lazy" onerror="this.style.display=\'none\'">'
                         if item["url"]
                         else f'<div class="report-empty">{escape(item["empty_text"])}</div>'
                     )

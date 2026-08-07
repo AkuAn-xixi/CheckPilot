@@ -46,7 +46,7 @@ CheckPilot 是一个面向 ADB 设备自动化测试的本地工作台，覆盖�
 │  └─ voice_recorder_compare/   ASR 参考文本、录音和结果目录
 ├─ run_app.py                   一体化本地启动脚本
 ├─ build_exe.bat                一键打包脚本
-└─ ADBControl.spec              PyInstaller 配置
+└─ AutoDeck.spec              PyInstaller 配置
 ```
 
 ## 环境要求
@@ -146,7 +146,8 @@ python run_app.py
 
 - 直接输入并执行命令序列。
 - 基本格式：`KEYNAME/REPEAT/DELAY,KEYNAME/REPEAT/DELAY`
-- 示例：`HOME/1/1,DOWN/2/0.5,OK/1/1`
+- `REPEAT` 支持随机次数：`X:(A:B)` 随机 A~B 次（A 下限、B 上限，A、B 均为 0 时本次跳过该指令，随机结果为 0 同样跳过）；`X:N` 为兼容写法，随机 1~N 次；仅 `X` 随机 1~DELAY 次（DELAY 取整，至少 1 次）。
+- 示例：`HOME/1/1,DOWN/2/0.5,OK/1/1`，`OK/X:5/1`，`DOWN/X/3`
 
 ### Excel 工作区
 
@@ -159,6 +160,7 @@ python run_app.py
 - 读取 Excel 文件并分析有效用例行。
 - 驱动设备执行指令、保存截图、进行校验图比对。
 - 支持结果回看与用例字段编辑。
+- 校验占位指令：`Assert/1/1` 在当前位置截图校验，匹配即 PASS；`NotAssert/1/1` 为反向断言，截图**不匹配**目标图标才算 PASS（如确认弹窗/应用已关闭）。
 
 #### ASR 校验执行
 
@@ -229,7 +231,7 @@ build_exe.bat
 
 - 通过国内镜像源安装前端依赖并执行生产构建
 - 通过国内镜像源安装后端依赖和 PyInstaller
-- 基于 `ADBControl.spec` 构建单文件 exe
+- 基于 `AutoDeck.spec` 构建单文件 exe
 
 `build_exe.bat` 默认使用以下中国国内镜像源：
 
@@ -242,13 +244,13 @@ build_exe.bat
 ### 直接使用 PyInstaller
 
 ```bash
-pyinstaller --clean --noconfirm ADBControl.spec
+pyinstaller --clean --noconfirm AutoDeck.spec
 ```
 
 构建产物位于：
 
 ```text
-dist/ADBControl.exe
+dist/AutoDeck.exe
 ```
 
 ### 打包后运行说明

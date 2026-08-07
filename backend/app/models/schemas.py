@@ -55,6 +55,14 @@ class ExcelCaseFieldsUpdateRequest(BaseModel):
     verify_image: str
     test_result: str = ''
 
+class AddCaseRequest(BaseModel):
+    file_name: str
+    title: str = ''
+
+class DeleteCasesRequest(BaseModel):
+    file_name: str
+    excel_rows: list[int]
+
 class DeviceInfo(BaseModel):
     serial: str
     status: str

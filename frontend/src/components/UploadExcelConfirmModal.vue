@@ -22,15 +22,6 @@
         </div>
       </div>
 
-      <label class="flex items-center gap-2 mb-4 text-sm text-slate-600 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          v-model="dontShowAgain"
-          class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-        >
-        <span>{{ $t('common.uploadExcelDontShowAgain') }}</span>
-      </label>
-
       <div class="flex justify-end gap-2">
         <button class="btn btn-secondary btn-sm" @click="$emit('cancel')">
           {{ $t('common.uploadExcelConfirmCancel') }}
@@ -44,24 +35,13 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-
-const props = defineProps({
+defineProps({
   visible: { type: Boolean, required: true },
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
 
-const dontShowAgain = ref(false)
-
-watch(
-  () => props.visible,
-  (next) => {
-    if (next) dontShowAgain.value = false
-  },
-)
-
 const onConfirm = () => {
-  emit('confirm', { dontShowAgain: dontShowAgain.value })
+  emit('confirm')
 }
 </script>

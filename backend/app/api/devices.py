@@ -14,12 +14,14 @@ from ..models.schemas import CaptureCardDeviceSelectRequest, DevicePreviewSaveRe
 from ..runtime import get_controller, get_current_device as get_current_device_state, prune_current_device_if_offline, set_current_device
 from ..services.capture_card_service import capture_card_service
 from ..services.device_service import device_service
+from ..services.scrcpy_service import scrcpy_service
 from ..utils.adb_controller import KEYCODE_MAP
 from ..utils.path_resolver import get_image_dir
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 PREVIEW_SOURCE_ADB = "adb"
 PREVIEW_SOURCE_CAPTURE_CARD = "capture_card"
+PREVIEW_SOURCE_SCRCPY = "scrcpy"
 PREVIEW_STREAM_BOUNDARY = b"frame"
 
 
@@ -81,7 +83,7 @@ def _build_preview_image_reference(saved_path: Path) -> str:
 
 def _normalize_preview_source(source: str | None) -> str:
     normalized = str(source or PREVIEW_SOURCE_ADB).strip().lower()
-    if normalized not in {PREVIEW_SOURCE_ADB, PREVIEW_SOURCE_CAPTURE_CARD}:
+    if normalized not in {PREVIEW_SOURCE_ADB, PREVIEW_SOURCE_CAPTURE_CARD, PREVIEW_SOURCE_SCRCPY}:
         raise HTTPException(status_code=400, detail="预览来源无效")
     return normalized
 
@@ -124,6 +126,24 @@ def _iter_capture_card_preview_stream(first_frame: dict):
             else:
                 next_frame_deadline = time.perf_counter()
 
+
+def _iter_scrcpy_preview_stream(first_frame: dict):
+    """scrcpy 的 MJPEG 流生成器，与采集卡流结构一致。"""
+    yield _build_mjpeg_frame_chunk(first_frame["bytes"])
+    last_frame_at = time.perf_counter()
+
+    while True:
+        try:
+            jpeg_bytes, frame_perf, _meta = scrcpy_service.wait_for_new_jpeg(
+                last_frame_at,
+                timeout=1.0,
+            )
+        except RuntimeError:
+            break
+
+        yield _build_mjpeg_frame_chunk(jpeg_bytes)
+        last_frame_at = frame_perf
+
 @router.get("/list")
 async def list_devices():
     """获取设备列表"""
@@ -159,9 +179,27 @@ async def get_current_device():
 
 
 @router.get("/preview")
-async def get_device_preview(source: Annotated[str, Query(description="预览来源: adb 或 capture_card")] = PREVIEW_SOURCE_ADB):
-    """获取当前设备或采集卡的最新预览截图。"""
+async def get_device_preview(source: Annotated[str, Query(description="预览来源: adb / capture_card / scrcpy")] = PREVIEW_SOURCE_ADB):
+    """获取当前设备或采集卡或 scrcpy 的最新预览截图。"""
     preview_source = _normalize_preview_source(source)
+
+    if preview_source == PREVIEW_SOURCE_SCRCPY:
+        current_device = get_current_device_state()
+        if not current_device:
+            raise HTTPException(status_code=400, detail="请先选择设备")
+        try:
+            result = scrcpy_service.capture_encoded_frame()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return {
+            "status": "success",
+            "device": current_device,
+            "preview_source": preview_source,
+            "preview_label": f"scrcpy · {current_device}",
+            "captured_at": result.get("captured_at", int(time.time() * 1000)),
+            "screenshot_url": "",  # scrcpy 流模式下不走静态截图 URL
+            "jpeg_base64": base64.b64encode(result["bytes"]).decode("ascii"),
+        }
 
     if preview_source == PREVIEW_SOURCE_CAPTURE_CARD:
         try:
@@ -185,7 +223,9 @@ async def get_device_preview(source: Annotated[str, Query(description="预览来
         raise HTTPException(status_code=400, detail="请先选择设备")
 
     controller = get_controller()
-    screenshot_path = controller.take_screenshot(f"device_preview_{current_device}")
+    # take_screenshot 是阻塞 ADB 调用（adb exec-out screencap），必须在线程池执行，
+    # 否则设备响应慢/无响应时会冻结整个事件循环，导致其它接口全部超时。
+    screenshot_path = await asyncio.to_thread(controller.take_screenshot, f"device_preview_{current_device}")
     if not screenshot_path:
         raise HTTPException(status_code=502, detail="获取设备画面失败")
 
@@ -202,11 +242,30 @@ async def get_device_preview(source: Annotated[str, Query(description="预览来
 
 
 @router.get("/preview/stream")
-async def get_device_preview_stream(source: Annotated[str, Query(description="预览来源: 仅支持 capture_card")] = PREVIEW_SOURCE_CAPTURE_CARD):
-    """获取采集卡的实时预览流。"""
+async def get_device_preview_stream(source: Annotated[str, Query(description="预览来源: capture_card / scrcpy")] = PREVIEW_SOURCE_CAPTURE_CARD):
+    """获取采集卡或 scrcpy 的实时预览流。"""
     preview_source = _normalize_preview_source(source)
+
+    if preview_source == PREVIEW_SOURCE_SCRCPY:
+        current_device = get_current_device_state()
+        if not current_device:
+            raise HTTPException(status_code=400, detail="请先选择设备")
+        try:
+            first_frame = scrcpy_service.capture_encoded_frame()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return StreamingResponse(
+            _iter_scrcpy_preview_stream(first_frame),
+            media_type=f"multipart/x-mixed-replace; boundary={PREVIEW_STREAM_BOUNDARY.decode('ascii')}",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
     if preview_source != PREVIEW_SOURCE_CAPTURE_CARD:
-        raise HTTPException(status_code=400, detail="实时预览仅支持采集卡来源")
+        raise HTTPException(status_code=400, detail="实时预览仅支持采集卡或 scrcpy 来源")
 
     try:
         first_frame = capture_card_service.capture_encoded_frame()
@@ -343,3 +402,19 @@ async def execute_single_command(request: SingleCommandExecuteRequest):
         "execution_results": execution_results,
         "executed_command": command
     }
+
+
+@router.get("/scrcpy/status")
+async def get_scrcpy_status():
+    """返回 scrcpy 串流服务当前状态。"""
+    return {"status": scrcpy_service.get_status()}
+
+
+@router.post("/scrcpy/release")
+async def release_scrcpy():
+    """释放 scrcpy 子进程占用。"""
+    try:
+        scrcpy_service.release()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"释放 scrcpy 失败: {exc}")
+    return {"status": "success", "message": "scrcpy 进程已释放"}

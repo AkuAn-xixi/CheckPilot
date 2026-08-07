@@ -54,163 +54,209 @@
       </div>
       <div v-if="excelImportError" class="status-bar error mt-3">{{ excelImportError }}</div>
       <div v-else-if="excelImportMessage" class="status-bar success mt-3">{{ excelImportMessage }}</div>
-    </section>
 
-    <section class="config-section mb-4">
-      <div class="section-header">
-        <div>
-          <h3 class="section-title">{{ $t('customization.extraDelay') }}</h3>
-          <p class="section-desc">{{ $t('customization.extraDelayDesc') }}</p>
-        </div>
-        <div class="section-actions">
-          <button
-            class="btn btn-primary btn-sm"
-            :disabled="extraDelayLoading || !extraDelayDirty"
-            @click="saveExtraDelay"
-          >
-            {{ extraDelayLoading ? $t('customization.saving') : $t('customization.saveChanges') }}
-          </button>
-        </div>
-      </div>
-      <div v-if="extraDelayStatusMsg" :class="['status-bar', extraDelayStatusType]">{{ extraDelayStatusMsg }}</div>
-      <div class="extra-delay-row">
-        <input
-          v-model.number="extraDelayDraft"
-          type="number"
-          min="0"
-          step="0.5"
-          class="form-input"
-          style="width: 140px;"
-        >
-        <span class="text-sm text-gray-500">{{ $t('customization.extraDelaySeconds') }}</span>
-        <span class="text-xs text-gray-400 ml-3">{{ $t('customization.extraDelayHint', { example: extraDelayExampleHint }) }}</span>
-      </div>
-    </section>
-
-    <template v-if="selectedScheme">
-      <section class="config-section mb-4">
-        <div class="section-header">
-          <div>
-            <h3 class="section-title">{{ $t('customization.validKeys') }}</h3>
-            <p class="section-desc">{{ $t('customization.validKeysDesc') }}</p>
-          </div>
-          <div class="section-actions">
-            <button class="btn btn-secondary btn-sm" @click="confirmReset" :disabled="loading">{{ $t('customization.restoreDefault') }}</button>
-            <button class="btn btn-primary btn-sm" @click="saveKeys" :disabled="loading || !dirty">
-              {{ loading ? $t('customization.saving') : $t('customization.saveChanges') }}
-            </button>
-          </div>
-        </div>
-        <div v-if="statusMsg" :class="['status-bar', statusType]">{{ statusMsg }}</div>
-        <div class="add-row">
-          <input
-            v-model="newKey"
-            class="form-input add-input"
-            :placeholder="$t('customization.addKeyPlaceholder')"
-            @keydown.enter.prevent="addKey"
-            @input="newKey = newKey.toUpperCase()"
-            maxlength="40"
-          />
-          <button class="btn btn-primary btn-sm" @click="addKey" :disabled="!newKey.trim()">{{ $t('customization.add') }}</button>
-        </div>
-        <div v-if="keys.length" class="keys-grid">
-          <span
-            v-for="key in keys"
-            :key="key"
-            class="key-tag"
-            :class="{ 'key-tag-new': addedKeys.has(key) }"
-          >
-            {{ key }}
-            <button class="tag-remove" @click="removeKey(key)" :title="$t('customization.tooltips.remove')">×</button>
-          </span>
-        </div>
-        <p v-else class="text-sm text-gray-400 mt-4">{{ $t('customization.noKeys') }}</p>
-        <p class="key-count">{{ $t('customization.keyCount', { count: keys.length }) }}</p>
-      </section>
-      <section class="config-section">
-        <div class="section-header">
-          <div>
-            <h3 class="section-title">{{ $t('customization.keyCodeMapping') }}</h3>
-            <p class="section-desc">{{ $t('customization.keyCodeDesc') }}</p>
-          </div>
-          <div class="section-actions">
-            <button class="btn btn-secondary btn-sm" @click="confirmResetCodes" :disabled="kcLoading">{{ $t('customization.restoreDefault') }}</button>
-          </div>
-        </div>
-        <div v-if="kcStatusMsg" :class="['status-bar', kcStatusType]">{{ kcStatusMsg }}</div>
-        <div class="add-row mb-4">
-          <input
-            v-model="kcNewName"
-            class="form-input add-input"
-            :placeholder="$t('customization.keyNamePlaceholder')"
-            @input="kcNewName = kcNewName.toUpperCase()"
-            maxlength="40"
-          />
-          <input
-            v-model.number="kcNewCode"
-            class="form-input"
-            style="width:100px;"
-            type="number"
-            min="0"
-            :placeholder="$t('customization.keyCodePlaceholder')"
-          />
-          <button class="btn btn-primary btn-sm" @click="addKeyCode" :disabled="!kcNewName.trim() || kcNewCode === ''">{{ $t('customization.addOrOverride') }}</button>
-        </div>
-        <div class="kc-table-wrap">
-          <table class="kc-table">
-            <thead>
-              <tr>
-                <th>{{ $t('customization.columns.keyName') }}</th>
-                <th>{{ $t('customization.columns.keyCode') }}</th>
-                <th>{{ $t('customization.columns.type') }}</th>
-                <th style="width:60px;"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="[name, code] in sortedKeyCodes"
-                :key="name"
-                :class="{ 'kc-custom': customOverrides[name] !== undefined }"
+      <div v-if="selectedScheme" class="scheme-content">
+        <section class="config-section">
+          <div class="section-header">
+            <div>
+              <h3 class="section-title">{{ $t('customization.extraDelay') }}</h3>
+            </div>
+            <div class="section-actions">
+              <button
+                class="btn btn-primary btn-sm"
+                :disabled="extraDelayLoading || !extraDelayDirty"
+                @click="saveExtraDelay"
               >
-                <td class="kc-name">{{ name }}</td>
-                <td>
-                  <span v-if="!editingKey || editingKey !== name" class="kc-code">{{ code }}</span>
-                  <input
-                    v-else
-                    v-model.number="editingCode"
-                    class="form-input kc-edit-input"
-                    type="number"
-                    min="0"
-                    @keydown.enter="commitEdit(name)"
-                    @keydown.escape="editingKey = null"
-                  />
-                </td>
-                <td>
-                  <span v-if="customOverrides[name] !== undefined" class="badge-custom">{{ $t('customization.custom') }}</span>
-                  <span v-else class="badge-default">{{ $t('customization.default') }}</span>
-                </td>
-                <td class="kc-actions">
-                  <template v-if="!editingKey || editingKey !== name">
-                    <button class="act-btn" @click="startEdit(name, code)" :title="$t('customization.tooltips.edit')">✎</button>
-                    <button
-                      v-if="customOverrides[name] !== undefined"
-                      class="act-btn act-del"
-                      @click="deleteOverride(name)"
-                      :title="$t('customization.tooltips.restoreDefault')"
-                    >↩</button>
-                  </template>
-                  <template v-else>
-                    <button class="act-btn act-ok" @click="commitEdit(name)" :title="$t('customization.tooltips.confirm')">✓</button>
-                    <button class="act-btn" @click="editingKey = null" :title="$t('customization.tooltips.cancel')">✕</button>
-                  </template>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="key-count">{{ $t('customization.mappingCount', { total: sortedKeyCodes.length, custom: Object.keys(customOverrides).length }) }}</p>
-      </section>
-    </template>
+                {{ extraDelayLoading ? $t('customization.saving') : $t('customization.saveChanges') }}
+              </button>
+            </div>
+          </div>
+          <div v-if="extraDelayStatusMsg" :class="['status-bar', extraDelayStatusType]">{{ extraDelayStatusMsg }}</div>
+          <div class="extra-delay-row">
+            <input
+              v-model.number="extraDelayDraft"
+              type="number"
+              min="0"
+              step="0.5"
+              class="form-input"
+              style="width: 140px;"
+            >
+            <span class="text-sm text-gray-500">{{ $t('customization.extraDelaySeconds') }}</span>
+            <span class="text-xs text-gray-400 ml-3">{{ $t('customization.extraDelayHint', { example: extraDelayExampleHint }) }}</span>
+          </div>
+        </section>
+        <section class="config-section">
+          <div class="section-header">
+            <div>
+              <h3 class="section-title">{{ $t('customization.validKeys') }}</h3>
+            </div>
+            <div class="section-actions">
+              <button class="btn btn-secondary btn-sm" @click="confirmReset" :disabled="loading">{{ $t('customization.restoreDefault') }}</button>
+              <button class="btn btn-primary btn-sm" @click="saveKeys" :disabled="loading || !dirty">
+                {{ loading ? $t('customization.saving') : $t('customization.saveChanges') }}
+              </button>
+            </div>
+          </div>
+          <div v-if="statusMsg" :class="['status-bar', statusType]">{{ statusMsg }}</div>
+          <div class="add-row">
+            <input
+              v-model="newKey"
+              class="form-input add-input"
+              :placeholder="$t('customization.addKeyPlaceholder')"
+              @keydown.enter.prevent="addKey"
+              @input="newKey = newKey.toUpperCase()"
+              maxlength="40"
+            />
+            <button class="btn btn-primary btn-sm" @click="addKey" :disabled="!newKey.trim()">{{ $t('customization.add') }}</button>
+          </div>
+          <div v-if="keys.length" class="keys-grid">
+            <span
+              v-for="key in keys"
+              :key="key"
+              class="key-tag"
+              :class="{ 'key-tag-new': addedKeys.has(key) }"
+            >
+              {{ key }}
+              <button class="tag-remove" @click="removeKey(key)" :title="$t('customization.tooltips.remove')">×</button>
+            </span>
+          </div>
+          <p v-else class="text-sm text-gray-400 mt-4">{{ $t('customization.noKeys') }}</p>
+          <p class="key-count">{{ $t('customization.keyCount', { count: keys.length }) }}</p>
+        </section>
+        <section class="config-section">
+          <div class="section-header">
+            <div>
+              <h3 class="section-title">{{ $t('customization.keyCodeMapping') }}</h3>
+            </div>
+            <div class="section-actions">
+              <button class="btn btn-secondary btn-sm" @click="confirmResetCodes" :disabled="kcLoading">{{ $t('customization.restoreDefault') }}</button>
+            </div>
+          </div>
+          <div v-if="kcStatusMsg" :class="['status-bar', kcStatusType]">{{ kcStatusMsg }}</div>
+          <div class="add-row mb-4">
+            <input
+              v-model="kcNewName"
+              class="form-input add-input"
+              :placeholder="$t('customization.keyNamePlaceholder')"
+              @input="kcNewName = kcNewName.toUpperCase()"
+              maxlength="40"
+            />
+            <input
+              v-model.number="kcNewCode"
+              class="form-input"
+              style="width:100px;"
+              type="number"
+              min="0"
+              :placeholder="$t('customization.keyCodePlaceholder')"
+            />
+            <button class="btn btn-primary btn-sm" @click="addKeyCode" :disabled="!kcNewName.trim() || kcNewCode === ''">{{ $t('customization.addOrOverride') }}</button>
+          </div>
+          <div class="kc-table-wrap">
+            <table class="kc-table">
+              <thead>
+                <tr>
+                  <th>{{ $t('customization.columns.keyName') }}</th>
+                  <th>{{ $t('customization.columns.keyCode') }}</th>
+                  <th>{{ $t('customization.columns.type') }}</th>
+                  <th style="width:60px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="[name, code] in sortedKeyCodes"
+                  :key="name"
+                  :class="{ 'kc-custom': customOverrides[name] !== undefined }"
+                >
+                  <td class="kc-name">{{ name }}</td>
+                  <td>
+                    <span v-if="!editingKey || editingKey !== name" class="kc-code">{{ code }}</span>
+                    <input
+                      v-else
+                      v-model.number="editingCode"
+                      class="form-input kc-edit-input"
+                      type="number"
+                      min="0"
+                      @keydown.enter="commitEdit(name)"
+                      @keydown.escape="editingKey = null"
+                    />
+                  </td>
+                  <td>
+                    <span v-if="customOverrides[name] !== undefined" class="badge-custom">{{ $t('customization.custom') }}</span>
+                    <span v-else class="badge-default">{{ $t('customization.default') }}</span>
+                  </td>
+                  <td class="kc-actions">
+                    <template v-if="!editingKey || editingKey !== name">
+                      <button class="act-btn" @click="startEdit(name, code)" :title="$t('customization.tooltips.edit')">✎</button>
+                      <button
+                        v-if="customOverrides[name] !== undefined"
+                        class="act-btn act-del"
+                        @click="deleteOverride(name)"
+                        :title="$t('customization.tooltips.restoreDefault')"
+                      >↩</button>
+                    </template>
+                    <template v-else>
+                      <button class="act-btn act-ok" @click="commitEdit(name)" :title="$t('customization.tooltips.confirm')">✓</button>
+                      <button class="act-btn" @click="editingKey = null" :title="$t('customization.tooltips.cancel')">✕</button>
+                    </template>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="key-count">{{ $t('customization.mappingCount', { total: sortedKeyCodes.length, custom: Object.keys(customOverrides).length }) }}</p>
+        </section>
+        <section class="config-section">
+          <div class="section-header">
+            <div>
+              <h3 class="section-title">{{ $t('customization.customCommands') }}</h3>
+              <p class="section-desc">{{ $t('customization.customCommandsDesc') }}</p>
+            </div>
+            <div class="section-actions">
+              <button class="btn btn-secondary btn-sm" @click="resetCustomCommands" :disabled="ccLoading || Object.keys(customCommands).length === 0">{{ $t('customization.restoreDefault') }}</button>
+            </div>
+          </div>
+          <div v-if="ccStatusMsg" :class="['status-bar', ccStatusType]">{{ ccStatusMsg }}</div>
+          <div class="add-row mb-4">
+            <input
+              v-model="ccNewName"
+              class="form-input add-input"
+              :placeholder="$t('customization.commandKeyNamePlaceholder')"
+              @input="ccNewName = ccNewName.toUpperCase()"
+              maxlength="40"
+            />
+            <input
+              v-model="ccNewCommand"
+              class="form-input cc-command-input"
+              :placeholder="$t('customization.commandPlaceholder')"
+              @keydown.enter.prevent="addCustomCommand"
+            />
+            <button class="btn btn-primary btn-sm" @click="addCustomCommand" :disabled="!ccNewName.trim() || !ccNewCommand.trim()">{{ $t('customization.addOrOverride') }}</button>
+          </div>
+          <div class="kc-table-wrap">
+            <table class="kc-table">
+              <thead>
+                <tr>
+                  <th>{{ $t('customization.columns.keyName') }}</th>
+                  <th>{{ $t('customization.columns.command') }}</th>
+                  <th style="width:60px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="[name, command] in sortedCustomCommands" :key="name">
+                  <td class="kc-name">{{ name }}</td>
+                  <td class="cc-command">{{ command }}</td>
+                  <td class="kc-actions">
+                    <button class="act-btn act-del" @click="deleteCustomCommand(name)" :title="$t('customization.tooltips.remove')">×</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="Object.keys(customCommands).length === 0" class="text-sm text-gray-400 mt-4">{{ $t('customization.noKeys') }}</p>
+          <p class="key-count">{{ $t('customization.commandCount', { count: Object.keys(customCommands).length }) }}</p>
+        </section>
+      </div>
+    </section>
     <div v-if="showCreateModal" class="modal-backdrop" @click.self="showCreateModal = false">
       <div class="modal-box">
         <h4 class="modal-title">{{ $t('customization.createModalTitle') }}</h4>
@@ -283,6 +329,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { showConfirm as confirm } from '../stores/dialogStore'
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -446,15 +493,21 @@ async function fetchSchemes() {
     const data = await res.json()
     schemes.value = data.schemes || []
     activeScheme.value = data.active_scheme || ''
-    if (!selectedScheme.value || !schemes.value.find(s => s.name === selectedScheme.value)) {
-      selectedScheme.value = activeScheme.value || schemes.value[0]?.name || ''
+    // 仅在已展开某方案时保持选中；首次加载默认收起
+    if (selectedScheme.value && !schemes.value.find(s => s.name === selectedScheme.value)) {
+      selectedScheme.value = ''
     }
   } catch { }
 }
 
-function selectScheme(name) {
-  if (selectedScheme.value === name) return
-  if (!confirmDiscardUnsavedChanges()) return
+async function selectScheme(name) {
+  if (selectedScheme.value === name) {
+    // 再次点击同一方案 → 收起
+    if (!(await confirmDiscardUnsavedChanges())) return
+    selectedScheme.value = ''
+    return
+  }
+  if (!(await confirmDiscardUnsavedChanges())) return
   selectedScheme.value = name
 }
 
@@ -623,11 +676,124 @@ const editingCode = ref(0)
 const editingOriginalCode = ref(null)
 let kcTimer = null
 
+// 自定义 ADB 命令：按键名 → adb 命令字符串
+const customCommands = ref({})
+const ccNewName = ref('')
+const ccNewCommand = ref('')
+const ccLoading = ref(false)
+const ccStatusMsg = ref('')
+const ccStatusType = ref('info')
+let ccTimer = null
+
+const sortedCustomCommands = computed(() =>
+  Object.entries(customCommands.value).sort(([a], [b]) => a.localeCompare(b))
+)
+
+function showCcStatus(msg, type = 'success') {
+  ccStatusMsg.value = msg
+  ccStatusType.value = type
+  clearTimeout(ccTimer)
+  ccTimer = setTimeout(() => { ccStatusMsg.value = '' }, 3000)
+}
+
+async function fetchCustomCommands() {
+  if (!selectedScheme.value) return
+  ccLoading.value = true
+  try {
+    const res = await fetch(`/api/customization/schemes/${encodeURIComponent(selectedScheme.value)}/custom-commands`)
+    const data = await res.json()
+    customCommands.value = data.custom_commands || {}
+  } catch {
+    showCcStatus(t('customization.status.loadCommandsFailed'), 'error')
+  } finally {
+    ccLoading.value = false
+  }
+}
+
+async function saveCustomCommands(updated) {
+  ccLoading.value = true
+  try {
+    const res = await fetch(`/api/customization/schemes/${encodeURIComponent(selectedScheme.value)}/custom-commands`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ custom_commands: updated })
+    })
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || t('customization.status.saveFailed')) }
+    const data = await res.json()
+    customCommands.value = data.custom_commands
+    showCcStatus(t('customization.status.commandSaved'))
+  } catch (e) {
+    showCcStatus(e.message || t('customization.status.saveFailed'), 'error')
+  } finally {
+    ccLoading.value = false
+  }
+}
+
+async function addCustomCommand() {
+  const name = ccNewName.value.trim().toUpperCase()
+  const command = ccNewCommand.value.trim()
+  if (!name || !command) return
+  const updated = { ...customCommands.value, [name]: command }
+  await saveCustomCommands(updated)
+  ccNewName.value = ''
+  ccNewCommand.value = ''
+}
+
+async function deleteCustomCommand(name) {
+  ccLoading.value = true
+  try {
+    const res = await fetch(
+      `/api/customization/schemes/${encodeURIComponent(selectedScheme.value)}/custom-commands/${encodeURIComponent(name)}`,
+      { method: 'DELETE' }
+    )
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      throw new Error(e.detail || t('customization.status.deleteFailed'))
+    }
+    const data = await res.json()
+    customCommands.value = data.custom_commands
+    showCcStatus(t('customization.status.commandDeleted', { name }))
+  } catch (e) {
+    showCcStatus(e.message || t('customization.status.deleteFailed'), 'error')
+  } finally {
+    ccLoading.value = false
+  }
+}
+
+async function resetCustomCommands() {
+  const confirmed = await confirm({
+    title: t('customization.resetCommandsTitle'),
+    message: t('customization.resetCommandsBody', { name: selectedScheme.value }),
+    confirmText: t('customization.confirmRestore'),
+    cancelText: t('common.cancel'),
+  })
+  if (!confirmed) return
+  ccLoading.value = true
+  try {
+    const res = await fetch(
+      `/api/customization/schemes/${encodeURIComponent(selectedScheme.value)}/custom-commands/reset`,
+      { method: 'POST' }
+    )
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      throw new Error(e.detail || t('customization.status.restoreFailed'))
+    }
+    const data = await res.json()
+    customCommands.value = data.custom_commands
+    showCcStatus(t('customization.status.commandCleared'))
+  } catch (e) {
+    showCcStatus(e.message || t('customization.status.restoreFailed'), 'error')
+  } finally {
+    ccLoading.value = false
+  }
+}
+
 const hasPendingKeyCodeDraft = computed(() => {
   const hasNewKeyNameDraft = kcNewName.value.trim().length > 0
   const hasNewKeyCodeDraft = kcNewCode.value !== '' && kcNewCode.value !== null && kcNewCode.value !== undefined
   const hasInlineEditDraft = editingKey.value !== null && Number(editingCode.value) !== Number(editingOriginalCode.value)
-  return hasNewKeyNameDraft || hasNewKeyCodeDraft || hasInlineEditDraft
+  const hasCommandDraft = ccNewName.value.trim().length > 0 || ccNewCommand.value.trim().length > 0
+  return hasNewKeyNameDraft || hasNewKeyCodeDraft || hasInlineEditDraft || hasCommandDraft
 })
 
 const hasUnsavedChanges = computed(() => dirty.value || hasPendingKeyCodeDraft.value)
@@ -640,14 +806,16 @@ function discardUnsavedChanges() {
   kcNewCode.value = ''
   editingKey.value = null
   editingOriginalCode.value = null
+  ccNewName.value = ''
+  ccNewCommand.value = ''
 }
 
-function confirmDiscardUnsavedChanges() {
+async function confirmDiscardUnsavedChanges() {
   if (!hasUnsavedChanges.value) {
     return true
   }
 
-  const confirmed = window.confirm(t('customization.alerts.unsavedChangesConfirm'))
+  const confirmed = await confirm(t('customization.alerts.unsavedChangesConfirm'))
   if (confirmed) {
     discardUnsavedChanges()
   }
@@ -770,24 +938,24 @@ watch(selectedScheme, (name) => {
   if (!name) return
   statusMsg.value = ''
   kcStatusMsg.value = ''
+  ccStatusMsg.value = ''
   dirty.value = false
   editingKey.value = null
   editingOriginalCode.value = null
+  ccNewName.value = ''
+  ccNewCommand.value = ''
   fetchKeys()
   fetchKeyCodes()
+  fetchCustomCommands()
 })
 
 onMounted(async () => {
   await fetchSchemes()
-  if (selectedScheme.value) {
-    fetchKeys()
-    fetchKeyCodes()
-  }
   await fetchExtraDelay()
 })
 
-onBeforeRouteLeave((to, from, next) => {
-  if (confirmDiscardUnsavedChanges()) {
+onBeforeRouteLeave(async (to, from, next) => {
+  if (await confirmDiscardUnsavedChanges()) {
     next()
     return
   }
@@ -827,6 +995,14 @@ onBeforeRouteLeave((to, from, next) => {
   border-top: 1px solid rgba(226,232,240,0.7);
 }
 .active-hint { font-size: 0.8rem; color: #16a34a; font-weight: 600; }
+.scheme-content {
+  margin-top: 16px;
+  padding-left: 16px;
+  border-left: 3px solid rgba(0,113,227,0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 .config-section {
   background: rgba(255,255,255,0.55);
   border: 1px solid rgba(226,232,240,0.85);
@@ -884,6 +1060,8 @@ onBeforeRouteLeave((to, from, next) => {
   border-radius: 6px; padding: 1px 8px; font-size: 0.82rem;
 }
 .kc-edit-input { width: 90px !important; padding: 4px 8px !important; font-size: 0.82rem !important; border-radius: 8px !important; }
+.cc-command-input { flex: 1.6; min-width: 200px; font-family: 'Courier New', monospace; }
+.cc-command { font-family: 'Courier New', monospace; font-size: 0.78rem; color: #475569; word-break: break-all; }
 .badge-custom { display: inline-block; padding: 1px 8px; background: #eef2ff; color: #4f46e5; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
 .badge-default { display: inline-block; padding: 1px 8px; background: #f1f5f9; color: #94a3b8; border-radius: 9999px; font-size: 0.75rem; }
 .kc-actions { display: flex; gap: 4px; }

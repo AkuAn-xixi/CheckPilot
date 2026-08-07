@@ -1,9 +1,11 @@
 import unittest
+import wave
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+import numpy as np
 from fastapi import UploadFile
 
 from backend.app.services.asr_service import AsrService
@@ -28,16 +30,16 @@ class AsrServiceDependencyStatusTests(unittest.TestCase):
 
         with mock.patch.object(service, "_inspect_dependency", side_effect=lambda name: dependency_details[name]), \
              mock.patch("backend.app.services.asr_service.sys.frozen", True, create=True), \
-             mock.patch("backend.app.services.asr_service.sys.executable", "D:/Project/Check/dist/ADBControl.exe"):
+             mock.patch("backend.app.services.asr_service.sys.executable", "D:/Project/Check/dist/AutoDeck.exe"):
             status = service.get_runtime_dependency_status()
 
         self.assertEqual(status["runtime_mode"], "frozen")
-        self.assertEqual(status["executable_path"], "D:/Project/Check/dist/ADBControl.exe")
+        self.assertEqual(status["executable_path"], "D:/Project/Check/dist/AutoDeck.exe")
         self.assertEqual(status["missing"], ["qwen_asr"])
         self.assertTrue(status["restart_required"])
-        self.assertIn("当前运行的是打包版 ADBControl.exe", status["install_steps"][0])
+        self.assertIn("当前运行的是打包版 AutoDeck.exe", status["install_steps"][0])
         self.assertIn("build_exe.bat", " ".join(status["install_steps"]))
-        self.assertTrue(any("ADBControl.exe" in note for note in status["notes"]))
+        self.assertTrue(any("AutoDeck.exe" in note for note in status["notes"]))
         self.assertEqual(status["dependency_details"]["qwen_asr"]["missing_module"], "qwen_asr")
 
     def test_get_runtime_dependency_status_surfaces_transitive_import_failure(self):
@@ -58,6 +60,53 @@ class AsrServiceDependencyStatusTests(unittest.TestCase):
         self.assertEqual(status["missing"], ["qwen_asr"])
         self.assertIn("nagisa", status["dependency_details"]["qwen_asr"]["error"])
         self.assertTrue(any("nagisa" in note for note in status["notes"]))
+
+
+class EnhanceAudioTests(unittest.TestCase):
+    @staticmethod
+    def _write_wav(path: Path, samples: np.ndarray, sr: int = 48000) -> None:
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((np.clip(samples, -1, 1) * 32767).astype(np.int16).tobytes())
+
+    @staticmethod
+    def _read_wav_rms(path: Path) -> tuple[float, float]:
+        with wave.open(str(path), "rb") as w:
+            data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+        return float(np.sqrt(np.mean(data ** 2))), float(np.max(np.abs(data)))
+
+    def test_enhance_audio_boosts_very_quiet_signal_to_target_level(self):
+        # 模拟采集卡极弱信号（RMS ~ -63dB），归一化后应接近 -20dB 目标且不削波
+        sr = 48000
+        t = np.arange(sr * 2) / sr
+        sig = 0.001 * np.sin(2 * np.pi * 800 * t)  # RMS ≈ 0.0007
+        with TemporaryDirectory() as tmp_dir:
+            audio_path = Path(tmp_dir) / "quiet.wav"
+            self._write_wav(audio_path, sig, sr)
+
+            AsrService.enhance_audio(audio_path, target_db=-20.0)
+
+            rms, peak = self._read_wav_rms(audio_path)
+            target_rms = 10 ** (-20 / 20)
+            self.assertGreater(rms, target_rms * 0.5, "弱信号应被放大到接近 -20dB 目标")
+            self.assertLess(rms, target_rms * 2.0, "不应过度放大")
+            self.assertLessEqual(peak, 1.0, "不应削波溢出")
+
+    def test_enhance_audio_caps_extreme_gain(self):
+        # 噪声级极弱信号应受 200x 增益上限约束，不会被无限放大
+        sr = 48000
+        t = np.arange(sr) / sr
+        sig = 0.0001 * np.sin(2 * np.pi * 800 * t)  # RMS ≈ 7e-5，需要 1400x 才到目标
+        with TemporaryDirectory() as tmp_dir:
+            audio_path = Path(tmp_dir) / "tiny.wav"
+            self._write_wav(audio_path, sig, sr)
+
+            AsrService.enhance_audio(audio_path, target_db=-20.0)
+
+            rms, peak = self._read_wav_rms(audio_path)
+            self.assertLess(rms, 0.05, "增益应被 200x 上限约束，不会爆音")
 
 
 class AsrServiceResourceResolutionTests(unittest.TestCase):

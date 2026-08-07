@@ -16,9 +16,6 @@
             <button v-else type="button" class="btn btn-primary" @click="scrollToDeviceHub">
               {{ $t('home.selectDeviceFirst') }}
             </button>
-            <router-link to="/commands" class="btn btn-secondary">
-              {{ $t('home.openCommands') }}
-            </router-link>
             <button type="button" class="btn btn-ghost" @click="showChangelog = true">
               {{ $t('home.changelog') }}
             </button>
@@ -198,6 +195,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import changelogData from '../data/changelog.json'
+import { showAlert as alert } from '../stores/dialogStore'
 
 const DEVICE_STATUS_EVENT = 'checkpilot:device-updated'
 const PLATFORM_AUTH_EVENT = 'checkpilot:platform-auth-updated'
@@ -404,14 +402,14 @@ const selectDevice = async (index, device) => {
     const data = await response.json()
 
     if (!response.ok || data.status !== 'success') {
-      alert(t('deviceManagement.alerts.failed', { detail: data.detail || t('deviceManagement.alerts.unknown') }))
+      await alert(t('deviceManagement.alerts.failed', { detail: data.detail || t('deviceManagement.alerts.unknown') }))
       return
     }
 
     await refreshDevicePanel()
   } catch (error) {
     console.error('Failed to select device:', error)
-    alert(t('deviceManagement.alerts.retry'))
+    await alert(t('deviceManagement.alerts.retry'))
   } finally {
     selectingDevice.value = ''
   }
@@ -420,7 +418,7 @@ const selectDevice = async (index, device) => {
 const submitPlatformLogin = async () => {
   if (!loginUsername.value.trim() || !loginPassword.value) {
     console.warn('[PlatformAuth Login] 表单校验失败: 用户名或密码为空')
-    alert(t('home.remoteLoginFormRequired'))
+    await alert(t('home.remoteLoginFormRequired'))
     return
   }
 
@@ -464,7 +462,7 @@ const submitPlatformLogin = async () => {
       const errorMsg = extractLoginMessage(payload, t('home.remoteLoginFailed'))
       console.error(`[PlatformAuth Login] 登录失败: ${errorMsg}`)
       console.error(`[PlatformAuth Login] 完整响应:`, payload)
-      alert(errorMsg)
+      await alert(errorMsg)
       return
     }
 
@@ -478,7 +476,7 @@ const submitPlatformLogin = async () => {
 
     console.warn('[PlatformAuth Login] 登录成功但token未保存!')
     console.warn('[PlatformAuth Login] 上游响应数据:', payload?.data)
-    alert(t('home.remoteLoginSuccessNoToken'))
+    await alert(t('home.remoteLoginSuccessNoToken'))
   } catch (error) {
     console.error('[PlatformAuth Login] ========== 登录流程异常 ==========')
     console.error('[PlatformAuth Login] 异常类型:', error?.name)
@@ -489,7 +487,7 @@ const submitPlatformLogin = async () => {
     if (error?.cause) {
       console.error('[PlatformAuth Login] 原始异常:', error.cause)
     }
-    alert(t('home.remoteLoginRetry'))
+    await alert(t('home.remoteLoginRetry'))
   } finally {
     loginLoading.value = false
     console.log('[PlatformAuth Login] loading状态已重置')
@@ -515,7 +513,7 @@ const logoutPlatformAuth = async () => {
     if (!response.ok || payload?.status !== 'success') {
       const errorMsg = extractLoginMessage(payload, t('home.remoteLogoutFailed'))
       console.error(`[PlatformAuth Logout] 退出失败: ${errorMsg}`)
-      alert(errorMsg)
+      await alert(errorMsg)
       return
     }
 
@@ -527,7 +525,7 @@ const logoutPlatformAuth = async () => {
   } catch (error) {
     console.error('[PlatformAuth Logout] ========== 退出登录异常 ==========')
     console.error('[PlatformAuth Logout] 异常:', error?.message || error)
-    alert(t('home.remoteLogoutRetry'))
+    await alert(t('home.remoteLogoutRetry'))
   } finally {
     logoutLoading.value = false
   }

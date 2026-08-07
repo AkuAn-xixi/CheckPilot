@@ -18,12 +18,7 @@
       </button>
     </div>
 
-    <section v-if="isExcelFeatureFullscreen" class="app-fullscreen-content">
-      <router-view />
-    </section>
-
-    <template v-else>
-      <header class="app-topbar">
+    <header v-if="!isExcelFeatureFullscreen" class="app-topbar">
         <div class="app-topbar-inner">
           <div class="brand-cluster">
             <div class="brand-mark" aria-hidden="true">
@@ -63,8 +58,8 @@
         </div>
       </header>
 
-      <main class="app-main">
-        <aside class="app-sidebar">
+      <main class="app-main" :class="{ 'app-main-solo': isExcelFeatureFullscreen }">
+        <aside v-if="!isExcelFeatureFullscreen" class="app-sidebar">
           <section class="card sidebar-panel">
             <div class="sidebar-header">
               <p class="eyebrow">{{ $t('app.navEyebrow') }}</p>
@@ -88,16 +83,22 @@
           </section>
         </aside>
 
-        <section class="app-content">
-          <router-view />
+        <section class="app-content" :class="{ 'app-content-solo': isExcelFeatureFullscreen }">
+          <router-view v-slot="{ Component }">
+            <keep-alive :include="['ExcelFeatureLayout', 'ExcelExecution', 'ExcelAsrAutomation']">
+              <component :is="Component" />
+            </keep-alive>
+          </router-view>
         </section>
       </main>
 
-      <footer class="app-footer">
-        <span>ADB Control Tool v1.1.1</span>
+      <footer v-if="!isExcelFeatureFullscreen" class="app-footer">
+        <span>AutoDeck 自动测控台 v1.1.1</span>
         <span>{{ currentDevice ? t('app.currentDevice', { device: currentDevice }) : statusMessage }}</span>
       </footer>
-    </template>
+
+    <ExecutionProgressCard />
+    <DialogHost />
   </div>
 </template>
 
@@ -106,6 +107,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { setLocale } from './i18n'
+import ExecutionProgressCard from './components/ExecutionProgressCard.vue'
+import DialogHost from './components/DialogHost.vue'
+import { executionState } from './stores/executionStore'
 
 const DEVICE_STATUS_EVENT = 'checkpilot:device-updated'
 const PLATFORM_AUTH_EVENT = 'checkpilot:platform-auth-updated'
@@ -120,15 +124,18 @@ const localeOptions = [
   { value: 'en-US', short: 'EN', label: 'English' }
 ]
 
-// 语言切换器只在首页显示，避免在功能页（设备/Excel/按键监听等）干扰用户操作
-const showLocaleSwitcher = computed(() => route.path === '/')
+// 语言切换器只在首页显示，避免在功能页（设备/Excel/按键监听等）干扰用户操作；
+// 执行任务进行中时右上角被进度卡片占用，也隐藏切换器避免重叠
+const showLocaleSwitcher = computed(() => (
+  route.path === '/'
+  && !(executionState.activeType !== null && executionState.status !== 'idle')
+))
 
 const statusMessage = computed(() => t('app.systemReady'))
 
 const sectionItems = computed(() => [
   { to: '/', label: t('app.nav.home.label'), description: t('app.nav.home.description') },
   { to: '/devices', label: t('app.nav.devices.label'), description: t('app.nav.devices.description') },
-  { to: '/commands', label: t('app.nav.commands.label'), description: t('app.nav.commands.description') },
   { to: '/excel', label: t('app.nav.excel.label'), description: t('app.nav.excel.description') },
   { to: '/keymonitor', label: t('app.nav.keymonitor.label'), description: t('app.nav.keymonitor.description') },
   { to: '/reports', label: t('app.nav.reports.label'), description: t('app.nav.reports.description') },
@@ -236,16 +243,6 @@ watch(
 
 .app-shell.excel-feature-shell {
   padding: 0;
-}
-
-.app-fullscreen-content {
-  position: relative;
-  z-index: 1;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .app-orb {
@@ -599,5 +596,17 @@ watch(
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* 全屏功能页（/excel/cases、/excel/asr、/keymonitor）：顶栏/侧栏/页脚隐藏，
+   主内容区铺满整个应用外壳。放在样式末尾以覆盖 .app-main / .app-content 的默认值。 */
+.app-main-solo {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  max-width: none;
+}
+
+.app-content-solo {
+  max-height: none;
 }
 </style>

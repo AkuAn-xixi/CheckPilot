@@ -15,9 +15,27 @@
           <p class="eyebrow">{{ $t('reports.list.eyebrow') }}</p>
           <h3>{{ $t('reports.list.title') }}</h3>
         </div>
+        <div class="reports-panel-tools">
+          <button
+            type="button"
+            class="btn btn-danger btn-sm"
+            :disabled="selectedReportIds.length === 0 || deletingReports"
+            @click="deleteSelectedReports"
+          >
+            {{ $t('reports.list.deleteSelected') }}<template v-if="selectedReportIds.length"> ({{ selectedReportIds.length }})</template>
+          </button>
+        </div>
       </div>
 
       <div class="reports-table-head">
+        <span class="reports-check-cell">
+          <input
+            type="checkbox"
+            :checked="allSelected"
+            :title="$t('reports.list.selectAll')"
+            @change="toggleSelectAll"
+          >
+        </span>
         <span>{{ $t('reports.list.columns.title') }}</span>
         <span>{{ $t('reports.list.columns.overview') }}</span>
         <span>{{ $t('reports.list.columns.metrics') }}</span>
@@ -26,6 +44,14 @@
 
       <div class="reports-table-body">
         <article v-for="item in reportRows" :key="item.report_id" class="reports-table-row">
+          <div class="reports-check-cell">
+            <input
+              type="checkbox"
+              :checked="isSelected(item.report_id)"
+              :aria-label="item.title"
+              @change="toggleSelect(item.report_id)"
+            >
+          </div>
           <div class="reports-title-cell">
             <strong>{{ item.title }}</strong>
             <p>{{ formatDate(item.updated_at) }} · {{ getReportKindLabel(item.kind) }}</p>
@@ -83,11 +109,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { showAlert as alert, showConfirm as confirm } from '../stores/dialogStore'
 
 const reports = ref([])
 const loadingReports = ref(false)
 const refreshing = ref(false)
 const deletingReportId = ref('')
+const deletingReports = ref(false)
+const selectedReportIds = ref([])
 const pageError = ref('')
 const { t } = useI18n({ useScope: 'global' })
 
@@ -143,6 +172,10 @@ const reportRows = computed(() => {
       overviewTone: overview.tone
     }
   })
+})
+
+const allSelected = computed(() => {
+  return reportRows.value.length > 0 && selectedReportIds.value.length === reportRows.value.length
 })
 
 const readErrorMessage = async (response, fallbackMessage) => {
@@ -224,7 +257,7 @@ const deleteReport = async (item) => {
   }
 
   const title = item.title || item.report_id
-  if (!window.confirm(t('reports.alerts.deleteConfirm', { title }))) {
+  if (!(await confirm(t('reports.alerts.deleteConfirm', { title })))) {
     return
   }
 
@@ -241,10 +274,65 @@ const deleteReport = async (item) => {
     }
 
     reports.value = reports.value.filter((report) => report.report_id !== item.report_id)
+    selectedReportIds.value = selectedReportIds.value.filter((id) => id !== item.report_id)
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : t('reports.alerts.deleteReportFailed')
   } finally {
     deletingReportId.value = ''
+  }
+}
+
+const isSelected = (reportId) => {
+  return selectedReportIds.value.includes(reportId)
+}
+
+const toggleSelect = (reportId) => {
+  selectedReportIds.value = selectedReportIds.value.includes(reportId)
+    ? selectedReportIds.value.filter((id) => id !== reportId)
+    : [...selectedReportIds.value, reportId]
+}
+
+const toggleSelectAll = () => {
+  selectedReportIds.value = allSelected.value
+    ? []
+    : reportRows.value.map((item) => item.report_id)
+}
+
+const deleteSelectedReports = async () => {
+  const count = selectedReportIds.value.length
+  if (count === 0) {
+    return
+  }
+
+  if (!(await confirm(t('reports.alerts.deleteBatchConfirm', { count })))) {
+    return
+  }
+
+  deletingReports.value = true
+  pageError.value = ''
+  try {
+    const response = await fetch('/api/reports/delete-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_ids: selectedReportIds.value })
+    })
+
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('reports.alerts.deleteBatchFailed')))
+    }
+
+    const data = await response.json()
+    const deletedCount = Array.isArray(data.deleted) ? data.deleted.length : 0
+    selectedReportIds.value = []
+    await loadReports()
+
+    if (deletedCount > 0) {
+      await alert(t('reports.alerts.deleteBatchSuccess', { count: deletedCount }))
+    }
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : t('reports.alerts.deleteBatchFailed')
+  } finally {
+    deletingReports.value = false
   }
 }
 
@@ -320,9 +408,28 @@ onMounted(async () => {
 .reports-table-head,
 .reports-table-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.35fr) minmax(180px, 0.9fr) minmax(300px, 1.2fr) auto;
+  grid-template-columns: 44px minmax(260px, 1.35fr) minmax(180px, 0.9fr) minmax(300px, 1.2fr) auto;
   gap: 16px;
   align-items: center;
+}
+
+.reports-panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reports-check-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reports-check-cell input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #2563eb;
 }
 
 .reports-table-head {

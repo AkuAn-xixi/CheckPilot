@@ -1,4 +1,4 @@
-# ADBControl Lite (精简版)
+# AutoDeck Lite (精简版)
 
 ## 打包大小对比
 
@@ -48,8 +48,8 @@ build_exe.bat
 
 ## 输出文件
 
-- 精简版：`dist/ADBControl_lite.exe`
-- 原版：`dist/ADBControl.exe`
+- 精简版：`dist/AutoDeck_lite.exe`
+- 原版：`dist/AutoDeck.exe`
 
 ## 注意事项
 

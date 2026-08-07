@@ -18,7 +18,7 @@ from .app.config import settings
 # 日志配置：控制台 + 文件
 if not logging.getLogger().handlers:
     from datetime import datetime
-    _log_filename = datetime.now().strftime("ADBControl_%Y%m%d_%H%M%S.log")
+    _log_filename = datetime.now().strftime("AutoDeck_%Y%m%d_%H%M%S.log")
     _log_filepath = settings.LOG_DIR / _log_filename
 
     _file_handler = logging.FileHandler(str(_log_filepath), encoding="utf-8")
@@ -30,6 +30,18 @@ if not logging.getLogger().handlers:
     _console_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 
     logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handler])
+
+# 过滤 Windows Proactor 事件循环的连接重置噪音（播放/拖动录屏视频时浏览器
+# Range 拉流被强制断开导致 asyncio 打 ERROR，实际不影响运行）。
+class _AsyncioConnectionResetFilter(logging.Filter):
+    def filter(self, record):
+        if record.name == 'asyncio':
+            message = record.getMessage()
+            if '_call_connection_lost' in message or 'WinError 10054' in message or 'ConnectionResetError' in message:
+                return False
+        return True
+
+logging.getLogger('asyncio').addFilter(_AsyncioConnectionResetFilter())
 logger = logging.getLogger(__name__)
 from .app.api import auth_router, asr_router, customization_router, devices_router, excel_router, execution_router, reports_router
 from .app.utils.adb_controller import ADBController, KEYCODE_MAP, get_keycode_map

@@ -60,10 +60,10 @@
         
         <div class="form-group mt-4" v-if="settings.timeControlMode === 'global'">
           <label class="form-label" for="globalDelay">{{ $t('settings.globalDelay') }}</label>
-          <input 
-            type="number" 
-            id="globalDelay" 
-            v-model.number="settings.globalDelay" 
+          <input
+            type="number"
+            id="globalDelay"
+            v-model.number="settings.globalDelay"
             class="form-input"
             min="0"
             step="0.1"
@@ -112,6 +112,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { showAlert as alert } from '../stores/dialogStore'
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -136,8 +137,8 @@ const loadSettings = () => {
   }
 }
 
-const saveSettings = () => {
+const saveSettings = async () => {
   localStorage.setItem('adbControlSettings', JSON.stringify(settings.value))
-  alert(t('settings.alerts.saveSuccess'))
+  await alert(t('settings.alerts.saveSuccess'))
 }
 </script>

@@ -87,6 +87,7 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
                  "result": "PASS",
              }), \
              mock.patch.object(asr.asr_service, "save_compare_report", return_value="results/compare_case-1.txt"), \
+             mock.patch.object(asr.asr_service, "reduce_noise"), \
              mock.patch("backend.app.api.asr.get_controller", return_value=fake_controller), \
              mock.patch("backend.app.api.asr.wait_with_cancellation", new=_noop_wait), \
              mock.patch("backend.app.api.asr.stream_row_command_events", new=_fake_stream_row_command_events):
@@ -131,6 +132,7 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
                  "result": "PASS",
              }), \
              mock.patch.object(asr.asr_service, "save_compare_report", return_value="results/compare_case-1.txt"), \
+             mock.patch.object(asr.asr_service, "reduce_noise"), \
              mock.patch("backend.app.api.asr.get_controller", return_value=fake_controller), \
              mock.patch("backend.app.api.asr.wait_with_cancellation", new=_noop_wait), \
              mock.patch("backend.app.api.asr.stream_row_command_events", new=fake_stream):
@@ -140,9 +142,8 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(recorder.started)
         self.assertTrue(recorder.stopped)
-        self.assertEqual(executed_batches, [["HOME/1/1"], ["OK/1/1"], ["BACK/1/1"]])
-        self.assertTrue(any("识别到 TTS 标记" in event.get("message", "") for event in events))
-        self.assertTrue(any("继续执行剩余命令" in event.get("message", "") for event in events))
+        # trigger + post 在同一段中一起执行
+        self.assertEqual(executed_batches, [["HOME/1/1"], ["OK/1/1", "BACK/1/1"]])
         self.assertEqual(events[-1]["status"], "success")
 
     async def test_execute_asr_commands_stream_falls_back_to_tts_text_when_reference_missing(self):
@@ -168,6 +169,7 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
                  "result": "PASS",
              }) as compare_mock, \
              mock.patch.object(asr.asr_service, "save_compare_report", return_value="results/compare_case-1.txt"), \
+             mock.patch.object(asr.asr_service, "reduce_noise"), \
              mock.patch("backend.app.api.asr.get_controller", return_value=fake_controller), \
              mock.patch("backend.app.api.asr.wait_with_cancellation", new=_noop_wait), \
              mock.patch("backend.app.api.asr.stream_row_command_events", new=_fake_stream_row_command_events):

@@ -1,8 +1,60 @@
 """图片验证服务模块"""
 import base64
+import json
+from typing import Any, Dict, Optional
+
 import cv2
 import numpy as np
-from typing import Dict, Any
+
+from ..config import settings
+
+# 颜色相似度下限默认值：形状/结构匹配但颜色明显不同的按钮（如同一按钮换主题色）
+# 不应被判为匹配。取适中值 0.4：同一按钮的明暗差异（HSV 直方图忽略 V）与
+# 轻微色差仍能通过（同图基线实测 ≥0.72），色相明显不同（≥20° 偏移，实测 ≤0.31）
+# 则判不匹配。可通过执行设置里的 color_min_similarity / color_weight 覆盖。
+DEFAULT_COLOR_MIN_SIMILARITY = 0.4
+DEFAULT_COLOR_WEIGHT = 0.2
+DEFAULT_FEATURE_MIN_SIMILARITY = 0.3
+# 最终分固定权重（颜色权重可配置，模板权重 = 剩余部分）
+STRUCTURE_WEIGHT = 0.2
+FEATURE_WEIGHT = 0.2
+
+
+def _load_verify_config() -> Dict[str, float]:
+    """读取客制化配置中的图片校验参数；无配置或非法时回落默认值。
+
+    返回 color_min_similarity / color_weight / feature_min_similarity 三项。
+    直接读 customization.json，避免导入 backend.app.api.customization：
+    该模块会连带 import openpyxl，首次调用会卡 ~1.6s。
+    """
+    defaults = {
+        "color_min_similarity": DEFAULT_COLOR_MIN_SIMILARITY,
+        "color_weight": DEFAULT_COLOR_WEIGHT,
+        "feature_min_similarity": DEFAULT_FEATURE_MIN_SIMILARITY,
+    }
+    try:
+        path = settings.CUSTOMIZATION_FILE
+        if not path.exists():
+            return defaults
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        def _clamp01(value, default: float) -> float:
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                return default
+            return parsed if 0.0 <= parsed <= 1.0 else default
+
+        return {
+            "color_min_similarity": _clamp01(data.get("color_min_similarity"), DEFAULT_COLOR_MIN_SIMILARITY),
+            "color_weight": _clamp01(data.get("color_weight"), DEFAULT_COLOR_WEIGHT),
+            "feature_min_similarity": _clamp01(data.get("feature_min_similarity"), DEFAULT_FEATURE_MIN_SIMILARITY),
+        }
+    except Exception:
+        return defaults
+
 
 class ImageVerifier:
     """图片验证器"""
@@ -10,6 +62,8 @@ class ImageVerifier:
     STANDARD_SIZE = (320, 180)
     TEMPLATE_SCALES = (0.7, 0.85, 1.0, 1.15, 1.3)
     MAX_POST_VERIFY_CANDIDATES = 8
+    # ORB 关键点过少（纯色/低纹理）时特征相似度没有意义，返回 None 并跳过特征门槛
+    MIN_ORB_KEYPOINTS = 10
 
     @staticmethod
     def _collect_border_pixels(image, border_width: int):
@@ -141,8 +195,13 @@ class ImageVerifier:
         return float(max(0.0, min(1.0, score)))
 
     @staticmethod
-    def calc_feature_similarity(img1, img2) -> float:
-        """计算 ORB 特征匹配相似度。"""
+    def calc_feature_similarity(img1, img2) -> Optional[float]:
+        """计算 ORB 特征匹配相似度；关键点过少无法有意义比较时返回 None。
+
+        ORB 在纯色/低纹理区域（如无文字的扁平按钮）往往检测不到足够关键点，
+        此时即使两图完全相同特征分也是 0，会误导"特征下限"门槛产生误杀。
+        返回 None 表示"特征信号不适用"，由调用方跳过特征门槛。
+        """
         resized1, resized2 = ImageVerifier._resize_for_compare(img1, img2)
         gray1 = cv2.cvtColor(resized1, cv2.COLOR_BGR2GRAY)
         gray2 = cv2.cvtColor(resized2, cv2.COLOR_BGR2GRAY)
@@ -151,8 +210,11 @@ class ImageVerifier:
         keypoints1, descriptors1 = orb.detectAndCompute(gray1, None)
         keypoints2, descriptors2 = orb.detectAndCompute(gray2, None)
 
-        if descriptors1 is None or descriptors2 is None or not keypoints1 or not keypoints2:
-            return 0.0
+        if (descriptors1 is None or descriptors2 is None
+                or not keypoints1 or not keypoints2
+                or len(keypoints1) < ImageVerifier.MIN_ORB_KEYPOINTS
+                or len(keypoints2) < ImageVerifier.MIN_ORB_KEYPOINTS):
+            return None
 
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
         raw_matches = matcher.knnMatch(descriptors1, descriptors2, k=2)
@@ -269,6 +331,7 @@ class ImageVerifier:
 
         feature_score = match.get("post_feature_score")
         if feature_score is None:
+            # 关键点过少时返回 None（特征信号不适用），由 _build_result 跳过特征门槛
             feature_score = ImageVerifier.calc_feature_similarity(roi, reference_patch)
 
         color_score = match.get("post_color_score")
@@ -279,11 +342,14 @@ class ImageVerifier:
 
         final_score = match.get("post_score")
         if final_score is None:
+            # 颜色权重可配置（默认 0.2），模板权重 = 剩余部分，保证各权重和为 1。
+            color_weight = _load_verify_config()["color_weight"]
+            template_weight = max(0.0, 1.0 - STRUCTURE_WEIGHT - FEATURE_WEIGHT - color_weight)
             final_score = (
-                template_score * 0.5 +
-                structure_score * 0.2 +
-                feature_score * 0.2 +
-                color_score * 0.1
+                template_score * template_weight +
+                structure_score * STRUCTURE_WEIGHT +
+                float(feature_score or 0.0) * FEATURE_WEIGHT +
+                color_score * color_weight
             )
 
         return final_score, template_score, color_score, feature_score, structure_score
@@ -309,23 +375,35 @@ class ImageVerifier:
             structure_score >= 0.6 and
             color_score >= 0.2
         )
+        # feature_score 可能为 None（关键点过少，特征信号不适用），此时按 0 参与
+        # 加权/判定，但跳过特征下限门槛，避免低纹理按钮被误杀。
+        feature_value = float(feature_score or 0.0)
+        feature_applicable = feature_score is not None
         icon_focus_match = (
             final_score >= 0.68 and
             template_score >= 0.72 and
-            feature_score >= 0.85 and
+            feature_value >= 0.85 and
             color_score >= 0.85
         )
         strong_visual_match = (
             final_score >= 0.64 and
             template_score >= 0.64 and
-            feature_score >= 0.95 and
+            feature_value >= 0.95 and
             color_score >= 0.95
         )
-        matched = strict_match or padded_template_match or icon_focus_match or strong_visual_match
+        matched = (strict_match or padded_template_match or icon_focus_match or strong_visual_match)
+        # 颜色/特征下限：所有匹配路径统一要求信号达到配置的下限，
+        # 防止"整体结构对但颜色完全不同 / 局部细节对不上"被误判为匹配。
+        verify_cfg = _load_verify_config()
+        color_min_similarity = verify_cfg["color_min_similarity"]
+        feature_min_similarity = verify_cfg["feature_min_similarity"]
+        matched = matched and color_score >= color_min_similarity
+        if feature_applicable:
+            matched = matched and feature_score >= feature_min_similarity
         visual_confidence_score = max(
             final_score,
-            template_score * 0.6 + color_score * 0.2 + feature_score * 0.2,
-            template_score * 0.7 + structure_score * 0.2 + color_score * 0.1,
+            template_score * 0.5 + color_score * 0.3 + feature_value * 0.2,
+            template_score * 0.6 + structure_score * 0.2 + color_score * 0.2,
         )
         reported_score = visual_confidence_score if matched else final_score
         matched = matched and reported_score >= required_score
@@ -337,7 +415,8 @@ class ImageVerifier:
             "template_score": float(template_score),
             "struct_score": float(template_score),
             "color_score": float(color_score),
-            "feature_score": float(feature_score),
+            "feature_score": feature_value,
+            "feature_applicable": feature_applicable,
             "aspect_ratio_score": 1.0,
             "structure_score": float(structure_score),
             "local_structure_score": float(structure_score),
@@ -426,3 +505,52 @@ def verify_image_match(screen_img_path: str, icon_img_path: str, threshold: floa
 def verify_image_base64_match(screen_img_path: str, icon_img_base64: str, threshold: float = 0.9) -> Dict[str, Any]:
     """验证 base64 图片匹配的便捷函数"""
     return image_verifier.verify_base64(screen_img_path, icon_img_base64, threshold)
+
+
+def format_score_breakdown(verify_result: Dict[str, Any]) -> str:
+    """把图片校验的各信号得分与加权贡献格式化为日志字符串。
+
+    最终分 final = 模板×template_weight + 结构×0.2 + 特征×0.2 + 颜色×color_weight，
+    模板权重 = 1 - 0.2 - 0.2 - color_weight，与 :meth:`ImageVerifier.multi_signal_match`
+    保持一致。格式：``模板[权重×得分=加权贡献]``。
+
+    Args:
+        verify_result: image_service 校验结果字典（含 template_score / structure_score /
+            feature_score / color_score / score）。
+
+    Returns:
+        一行可读的加权明细，如 ``score=0.7832 | 模板[0.40×0.85=0.34] ...``。
+    """
+    template = verify_result.get("template_score") or 0.0
+    structure = verify_result.get("structure_score") or 0.0
+    feature = verify_result.get("feature_score") or 0.0
+    color = verify_result.get("color_score") or 0.0
+    feature_applicable = verify_result.get("feature_applicable", True)
+    verify_cfg = _load_verify_config()
+    color_weight = verify_cfg["color_weight"]
+    template_weight = max(0.0, 1.0 - STRUCTURE_WEIGHT - FEATURE_WEIGHT - color_weight)
+
+    def _weighted(label: str, weight: float, value: float) -> str:
+        return f"{label}[{weight:.2f}×{float(value):.4f}={float(value * weight):.4f}]"
+
+    # 门槛比对用的是原始信号分（不是加权贡献），✓/✗ 表示是否达到下限
+    def _gate_check(label: str, raw: float, threshold: float) -> str:
+        ok = raw >= threshold
+        return f"{label}{raw:.4f}≥{threshold:.2f}{'✓' if ok else '✗'}"
+
+    color_gate = _gate_check("颜色", color, verify_cfg["color_min_similarity"])
+    if feature_applicable:
+        feature_part = _weighted("特征", FEATURE_WEIGHT, feature)
+        feature_gate = _gate_check("特征", feature, verify_cfg["feature_min_similarity"])
+    else:
+        # 关键点过少无法计算时，仍展示特征值（0.0000），并标注"(不适用)"便于识别
+        feature_part = _weighted("特征", FEATURE_WEIGHT, feature) + "(不适用)"
+        feature_gate = f"特征{float(feature):.4f}(不适用,跳过门槛)"
+    return " | ".join([
+        f"score={float(verify_result.get('score', 0.0)):.4f}",
+        _weighted("模板", template_weight, template),
+        _weighted("结构", STRUCTURE_WEIGHT, structure),
+        feature_part,
+        _weighted("颜色", color_weight, color),
+        f"门槛比对[{color_gate} {feature_gate}]",
+    ])

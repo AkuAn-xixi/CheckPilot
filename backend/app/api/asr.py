@@ -1,6 +1,7 @@
 """ASR API 路由模块"""
 import logging
 import time
+from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -8,8 +9,10 @@ from pydantic import BaseModel
 
 from ..services.asr_service import (
     AsrRuntimeError,
+    BACKEND_KIND_COHERE,
     COHERE_DEFAULT_MODEL_NAME,
     COHERE_DEFAULT_REPO_ID,
+    TextComparer,
     asr_service,
 )
 from ..services.excel_service import excel_service
@@ -18,7 +21,6 @@ from .execution import (
     ExecutionStopped,
     ensure_execution_active,
     format_sse,
-    get_valid_row,
     stream_row_command_events,
     wait_with_cancellation,
 )
@@ -43,23 +45,41 @@ def _is_tts_marker(command: str) -> bool:
     return _normalize_command_name(command) == TTS_MARKER
 
 
-def _plan_asr_recording_commands(commands: list[str]) -> tuple[list[str], str, list[str], bool]:
-    tts_indexes = [index for index, command in enumerate(commands) if _is_tts_marker(command)]
+def _plan_multi_tts_segments(commands: list[str]) -> list[dict]:
+    """将命令按 TTS 标记切分为多个段。
+
+    无 TTS 标记时返回单段（所有命令在录音中执行）。
+    有 N 个 TTS 标记时返回 N 段，每段包含 trigger 命令和后续 post 命令。
+
+    每段: {pre: [...], trigger: str, post: [...], uses_tts: bool}
+    """
+    tts_indexes = [i for i, cmd in enumerate(commands) if _is_tts_marker(cmd)]
+
     if not tts_indexes:
-        return commands[:-1], commands[-1], [], False
+        # 无 TTS 标记：整条命令作为单段
+        if len(commands) < 2:
+            raise AsrRuntimeError("命令数量不足，至少需要 2 条命令")
+        return [{"pre": commands[:-1], "trigger": commands[-1], "post": [], "uses_tts": False}]
 
-    if len(tts_indexes) > 1:
-        raise AsrRuntimeError("当前 ASR 用例仅支持一个 TTS 标记")
+    segments = []
+    for i, tts_idx in enumerate(tts_indexes):
+        if tts_idx >= len(commands) - 1:
+            raise AsrRuntimeError(f"第 {i + 1} 个 TTS 标记后缺少待录音的命令")
 
-    tts_index = tts_indexes[0]
-    if tts_index >= len(commands) - 1:
-        raise AsrRuntimeError("TTS 后缺少待录音的下一条命令")
+        trigger = commands[tts_idx + 1]
+        if _is_tts_marker(trigger):
+            raise AsrRuntimeError(f"第 {i + 1} 个 TTS 标记后的命令不能继续是 TTS")
 
-    trigger_command = commands[tts_index + 1]
-    if _is_tts_marker(trigger_command):
-        raise AsrRuntimeError("TTS 后的下一条命令不能继续是 TTS")
+        # post: 当前 TTS 之后、下一个 TTS 之前的非 trigger 命令
+        next_boundary = tts_indexes[i + 1] if i + 1 < len(tts_indexes) else len(commands)
+        post = commands[tts_idx + 2:next_boundary]
 
-    return commands[:tts_index], trigger_command, commands[tts_index + 2:], True
+        # pre: 仅第一段包含 TTS 之前的命令
+        pre = commands[:tts_idx] if i == 0 else []
+
+        segments.append({"pre": pre, "trigger": trigger, "post": post, "uses_tts": True})
+
+    return segments
 
 
 class AsrModelSelectRequest(BaseModel):
@@ -100,21 +120,40 @@ async def import_asr_model_file(
 
 @router.post("/models/download")
 async def download_asr_model(request: CohereTranscribeDownloadRequest):
-    """下载 Cohere Transcribe 模型到运行时目录。
+    """下载 Cohere Transcribe 模型到运行时目录（SSE 流式进度）。"""
 
-    与"导入本地模型目录"互补：用户可以选择直接通过 HuggingFace 镜像拉取
-    ``CohereLabs/cohere-transcribe-03-2026`` 的全部权重，免去手工选择
-    几十个文件再批量上传。
-    """
+    import asyncio
+    import json
+    import threading
+    from queue import Queue, Empty
 
-    try:
-        return asr_service.download_cohere_transcribe(request.model_name, request.repo_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except AsrRuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"下载模型失败: {str(e)}")
+    progress_queue = Queue()
+
+    def run_download():
+        asr_service._download_with_progress(
+            request.model_name, request.repo_id, BACKEND_KIND_COHERE, progress_queue
+        )
+
+    thread = threading.Thread(target=run_download, daemon=True)
+    thread.start()
+
+    async def event_generator():
+        while True:
+            try:
+                event = progress_queue.get(timeout=0.5)
+            except Empty:
+                if not thread.is_alive():
+                    break
+                continue
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if event.get("type") in ("done", "error"):
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/models/select")
@@ -175,6 +214,26 @@ async def set_audio_config(request: AudioConfigRequest):
         raise HTTPException(status_code=500, detail=f"保存音频配置失败: {str(e)}")
 
 
+class SubstitutionsRequest(BaseModel):
+    rules: dict[str, str]
+
+
+@router.get("/substitutions")
+async def get_substitutions():
+    """获取当前 ASR 文本替换规则。"""
+    return {"rules": TextComparer.get_substitutions()}
+
+
+@router.put("/substitutions")
+async def set_substitutions(request: SubstitutionsRequest):
+    """保存 ASR 文本替换规则。"""
+    try:
+        TextComparer.save_substitutions(request.rules)
+        return {"status": "ok", "rules": TextComparer.get_substitutions()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存替换规则失败: {str(e)}")
+
+
 async def execute_asr_commands_stream(request: Request, file_name: str, row_index: int, valid_rows: list):
     execution_started_at = int(time.time() * 1000)
     active_model = asr_service.get_active_model()
@@ -199,19 +258,22 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
         })
         return
 
-    executed_row = get_valid_row(valid_rows, row_index)
+    # row_index 是 1-based 列表索引，直接用索引取行（不按 Excel 行号查找）
+    executed_row = valid_rows[row_index - 1] if 1 <= row_index <= len(valid_rows) else {}
     case_title = executed_row.get("title") or f"第 {row_index} 行"
     commands = [command for command in executed_row.get("commands", []) if str(command or "").strip()]
     if not commands:
         yield format_sse({"status": "error", "message": "当前用例没有可执行命令"})
         return
 
-    pre_record_commands, recorded_command, post_record_commands, uses_tts_marker = _plan_asr_recording_commands(commands)
+    try:
+        segments = _plan_multi_tts_segments(commands)
+    except AsrRuntimeError as exc:
+        yield format_sse({"status": "error", "message": str(exc)})
+        return
 
     reference = asr_service.find_reference(case_title)
-    recorder = None
-    recording_started = False
-    tts_text = ""
+    total_segments = len(segments)
 
     try:
         await ensure_execution_active(request)
@@ -221,7 +283,7 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
         })
         yield format_sse({
             "status": "info",
-            "message": f"开始执行 ASR 用例: {case_title}"
+            "message": f"开始执行 ASR 用例: {case_title} (共 {total_segments} 个校验段)"
         })
 
         if reference is not None:
@@ -230,7 +292,6 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                 "message": f"已加载参考文本: {reference['path']}"
             })
         else:
-            # 记录参考文件搜索细节，帮助排查匹配失败
             ref_root = asr_service.reference_root
             ref_dir_ok = ref_root.exists() and ref_root.is_dir()
             ref_files = [f.stem for f in ref_root.glob("*.txt")] if ref_dir_ok else []
@@ -242,226 +303,345 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     f"参考目录: {ref_root} (存在={ref_dir_ok}, 文件数={len(ref_files)})，"
                     f"如捕获到 TTS 输出则将使用 TTS 文本进行比对"
                 ),
-                "diagnostic": {
-                    "case_title": case_title,
-                    "normalized_key": normalized_key,
-                    "reference_root": str(ref_root),
-                    "reference_dir_exists": ref_dir_ok,
-                    "reference_file_count": len(ref_files),
-                },
             })
             logger.info(
                 "ASR 参考文本未匹配: 用例 '%s' (normalized: '%s') | 参考目录: %s (exists=%s, txt_count=%d)",
                 case_title, normalized_key, ref_root, ref_dir_ok, len(ref_files),
             )
 
-        # 有 TTS 标记：先执行标记前的命令（不录音），标记处开始录音
-        # 无 TTS 标记：所有命令都录音
-        if uses_tts_marker and pre_record_commands:
-            async for event in stream_row_command_events([{"commands": pre_record_commands}], 1, request):
-                yield format_sse(event)
+        # 逐段执行录音→TTS捕获→ASR→比对
+        for seg_index, segment in enumerate(segments):
+            recorder = None
+            recording_started = False
 
-        # 开始录音
-        await ensure_execution_active(request)
-        audio_config = asr_service.get_audio_config()
-        audio_device_index = audio_config.get("audio_device_index")
-        recorder = asr_service.create_recorder(device=audio_device_index)
+            try:
+                await ensure_execution_active(request)
 
-        try:
-            recorder.start_recording()
-        except Exception as rec_exc:
-            logger.error("[ASR] start_recording 失败: %s", rec_exc)
-            raise
+                if total_segments > 1:
+                    yield format_sse({
+                        "status": "info",
+                        "message": f"--- 校验段 {seg_index + 1}/{total_segments} ---",
+                        "segment_index": seg_index,
+                        "total_segments": total_segments,
+                    })
 
-        recording_started = True
-        mode_label = "采集卡" if audio_config.get("audio_input_mode") == "capture_card" else "外放"
-        device_info = f" (设备#{audio_device_index})" if audio_device_index is not None else " (系统默认)"
-        logger.info("[ASR] 录音已启动: %s%s", mode_label, device_info)
-        yield format_sse({
-            "status": "info",
-            "message": f"录制模式: {mode_label}{device_info}，开始录音"
-        })
+                # 清空 logcat（在所有命令执行前清空，确保从 pre-commands 开始捕获 TTS 输出）
+                controller = get_controller()
+                controller.clear_logcat()
 
-        # 清空 logcat，执行需要录音的命令
-        controller = get_controller()
-        controller.clear_logcat()
+                # 执行 pre-commands（不录音，仅发送指令）
+                pre_commands = segment.get("pre", [])
+                if pre_commands:
+                    async for event in stream_row_command_events([{"row": 1, "commands": pre_commands}], 1, request):
+                        yield format_sse(event)
 
-        if uses_tts_marker:
-            record_commands = [recorded_command] + post_record_commands
-        else:
-            record_commands = commands
+                # TTS 标记位置：开始录音
+                audio_config = asr_service.get_audio_config()
+                audio_device_index = audio_config.get("audio_device_index")
+                recorder = asr_service.create_recorder(device=audio_device_index)
 
-        async for event in stream_row_command_events([{"commands": record_commands}], 1, request):
-            yield format_sse(event)
+                try:
+                    recorder.start_recording()
+                except Exception as rec_exc:
+                    logger.error("[ASR] start_recording 失败: %s", rec_exc)
+                    raise
 
-        # 等待 TTS 输出完成后停止录音
-        await wait_with_cancellation(0.5, request)
+                recording_started = True
+                mode_label = "采集卡" if audio_config.get("audio_input_mode") == "capture_card" else "外放"
+                device_info = f" (设备#{audio_device_index})" if audio_device_index is not None else " (系统默认)"
+                logger.info("[ASR] 录音已启动: %s%s (段 %d/%d, TTS标记位置)", mode_label, device_info, seg_index + 1, total_segments)
+                yield format_sse({
+                    "status": "info",
+                    "message": f"录制模式: {mode_label}{device_info}，遇到 TTS 标记，开始录音",
+                    "segment_index": seg_index,
+                })
 
-        tts_text = (controller.get_last_tts_text() or "").strip()
-        if tts_text:
-            yield format_sse({
-                "status": "info",
-                "message": f"TTS 输出文本: {tts_text}",
-                "tts_text": tts_text,
-            })
-        else:
-            yield format_sse({
-                "status": "info",
-                "message": "未捕获到 TTS 输出文本",
-                "tts_text": "",
-            })
+                # 执行 trigger + post 命令
+                record_commands = [segment["trigger"]] + segment.get("post", [])
+                async for event in stream_row_command_events([{"row": 1, "commands": record_commands}], 1, request):
+                    yield format_sse(event)
 
-        recorder.stop_recording()
-        recording_started = False
-        logger.info("[ASR] 录音已停止")
+                # 等待 TTS 输出
+                tts_log_path = str(
+                    asr_service.log_root
+                    / f"tts_{asr_service._sanitize_case_name(case_title)}_s{seg_index}_{datetime.now():%Y%m%d_%H%M%S}.log"
+                )
+                tts_text = ""
+                for _tts_attempt in range(6):
+                    await wait_with_cancellation(0.5, request)
+                    tts_text = (controller.get_last_tts_text(log_path=tts_log_path) or "").strip()
+                    if tts_text:
+                        break
 
-        audio_path = asr_service.save_audio_recording(recorder, case_title)
-        logger.info("[ASR] 录音已保存: %s", audio_path)
-        yield format_sse({
-            "status": "info",
-            "message": f"录音已保存: {audio_path}"
-        })
+                if tts_text:
+                    yield format_sse({
+                        "status": "info",
+                        "message": f"TTS 输出文本: {tts_text}",
+                        "tts_text": tts_text,
+                        "segment_index": seg_index,
+                    })
+                else:
+                    yield format_sse({
+                        "status": "info",
+                        "message": "未捕获到 TTS 输出文本",
+                        "tts_text": "",
+                        "segment_index": seg_index,
+                    })
 
-        await ensure_execution_active(request)
-        yield format_sse({
-            "status": "info",
-            "message": "开始执行 ASR 识别..."
-        })
-        transcript = asr_service.transcribe_audio(audio_path)
-        transcript_path = asr_service.save_transcript(audio_path, transcript)
-        yield format_sse({
-            "status": "info",
-            "message": f"ASR 识别完成: {transcript or '识别结果为空'}",
-            "transcribed_text": transcript,
-            "transcript_path": str(transcript_path),
-            "tts_text": tts_text,
-        })
+                recorder.stop_recording()
+                recording_started = False
+                logger.info("[ASR] 录音已停止 (段 %d/%d)", seg_index + 1, total_segments)
 
-        reference_text = (reference or {}).get("text", "").strip() if reference else ""
-        reference_path = (reference or {}).get("path", "") if reference else ""
-        comparison_text = reference_text or tts_text
-        comparison_source = "reference" if reference_text else "tts"
+                audio_path = asr_service.save_audio_recording(recorder, f"{case_title}_s{seg_index}")
+                logger.info("[ASR] 录音已保存: %s", audio_path)
+                yield format_sse({
+                    "status": "info",
+                    "message": f"录音已保存: {audio_path}",
+                    "segment_index": seg_index,
+                })
 
-        if not comparison_text:
-            # 收集诊断信息，帮助定位 NO_REF 根因
-            reference_root = asr_service.reference_root
-            reference_dir_exists = reference_root.exists() and reference_root.is_dir()
-            reference_file_count = len(list(reference_root.glob("*.txt"))) if reference_dir_exists else 0
-            normalized_key = asr_service._normalize_reference_key(case_title)
+                # 确定比对文本
+                reference_text = (reference or {}).get("text", "").strip() if reference else ""
+                reference_path = (reference or {}).get("path", "") if reference else ""
+                comparison_text = reference_text or tts_text
+                comparison_source = "reference" if reference_text else "tts"
 
-            # 检查是否有近似匹配的参考文件（辅助排查命名不一致问题）
-            similar_refs = []
-            if reference_dir_exists:
-                for ref_file in reference_root.glob("*.txt"):
-                    ref_stem = ref_file.stem
-                    similar_refs.append(ref_stem)
+                if not comparison_text:
+                    reference_root = asr_service.reference_root
+                    reference_dir_exists = reference_root.exists() and reference_root.is_dir()
+                    reference_file_count = len(list(reference_root.glob("*.txt"))) if reference_dir_exists else 0
+                    normalized_key = asr_service._normalize_reference_key(case_title)
 
-            diagnostic = {
-                "case_title": case_title,
-                "normalized_key": normalized_key,
-                "reference_root": str(reference_root),
-                "reference_dir_exists": reference_dir_exists,
-                "reference_file_count": reference_file_count,
-                "available_references": similar_refs[:20],  # 最多展示 20 个，避免过多
-                "tts_capture_attempted": True,
-                "tts_raw": tts_text,
-                "uses_tts_marker": uses_tts_marker,
-                "recorded_command": recorded_command,
-            }
+                    logger.warning(
+                        "ASR NO_REF: 用例 '%s' 段 %d (normalized: '%s') 无参考文本且无 TTS 输出 | "
+                        "TTS文本: '%s' | trigger='%s'",
+                        case_title, seg_index + 1, normalized_key,
+                        tts_text, segment["trigger"],
+                    )
 
-            logger.warning(
-                "ASR NO_REF: 用例 '%s' (normalized: '%s') 无参考文本且无 TTS 输出 | "
-                "参考目录: %s (exists=%s, txt_count=%d) | "
-                "TTS文本: '%s' | uses_tts_marker=%s | recorded_cmd='%s'",
-                case_title, normalized_key,
-                reference_root, reference_dir_exists, reference_file_count,
-                tts_text, uses_tts_marker, recorded_command,
-            )
+                    yield format_sse({
+                        "status": "error",
+                        "message": f"段 {seg_index + 1}: 未找到参考文本，且未捕获到 TTS 文本，无法完成比对",
+                        "row_index": row_index,
+                        "segment_index": seg_index,
+                        "total_segments": total_segments,
+                        "asr_result": "NO_REF",
+                        "asr_score": None,
+                        "transcribed_text": "",
+                        "tts_text": tts_text,
+                        "audio_path": str(audio_path),
+                    })
+                    continue
 
-            yield format_sse({
-                "status": "error",
-                "message": "未找到参考文本，且未捕获到 TTS 文本，无法完成比对",
-                "row_index": row_index,
-                "asr_result": "NO_REF",
-                "asr_score": None,
-                "transcribed_text": transcript,
-                "tts_text": tts_text,
-                "audio_path": str(audio_path),
-                "transcript_path": str(transcript_path),
-                "diagnostic": diagnostic,
-            })
-            return
+                if not reference_text:
+                    yield format_sse({
+                        "status": "info",
+                        "message": "未找到参考文本，改用 TTS 输出文本进行比对",
+                        "reference_text": comparison_text,
+                        "tts_text": tts_text,
+                        "comparison_source": comparison_source,
+                        "segment_index": seg_index,
+                    })
 
-        if not reference_text:
-            yield format_sse({
-                "status": "info",
-                "message": "未找到参考文本，改用 TTS 输出文本进行比对",
-                "reference_text": comparison_text,
-                "tts_text": tts_text,
-                "comparison_source": comparison_source,
-            })
+                # ── 音频处理（仅一次） ────────────────────────────────
+                await ensure_execution_active(request)
+                yield format_sse({
+                    "status": "info",
+                    "message": "正在音频处理...",
+                    "segment_index": seg_index,
+                })
+                logger.info("[ASR] 开始音频处理: %s", audio_path)
+                try:
+                    # RMS 归一化到 -20dB，把采集卡等弱信号录音拉到标准音量，
+                    # 避免 boost_volume 线性放大对 -60dB 级信号无济于事。
+                    asr_service.enhance_audio(audio_path, target_db=-20.0)
+                    logger.info("[ASR] enhance_audio 完成")
+                except Exception as e:
+                    logger.error("[ASR] enhance_audio 失败: %s", e, exc_info=True)
+                try:
+                    asr_service.reduce_noise(audio_path)
+                    logger.info("[ASR] reduce_noise 完成")
+                except Exception as e:
+                    logger.error("[ASR] reduce_noise 失败: %s", e, exc_info=True)
+                try:
+                    asr_service.adjust_speed(audio_path, speed=0.9)
+                    logger.info("[ASR] adjust_speed 完成")
+                except Exception as e:
+                    logger.error("[ASR] adjust_speed 失败: %s", e, exc_info=True)
+                logger.info("[ASR] 音频处理全部完成")
+                yield format_sse({
+                    "status": "info",
+                    "message": "音频处理完成，开始 ASR 识别...",
+                    "segment_index": seg_index,
+                })
 
-        comparison_threshold = TTS_COMPARISON_THRESHOLD if comparison_source == "tts" else 0.9
-        comparison = asr_service.compare_transcript(transcript, comparison_text, threshold=comparison_threshold)
-        compare_report_path = asr_service.save_compare_report(
-            audio_path,
-            transcript,
-            comparison_text,
-            comparison,
-        )
-        message = (
-            f"ASR 比对 {comparison['result']}: 平均 {comparison['average'] * 100:.2f}% / "
-            f"余弦 {comparison['cosine'] * 100:.2f}% / 序列 {comparison['sequence'] * 100:.2f}%"
-        )
+                # ── 3 次 ASR 校验，取最优值 ────────────────────────────
+                ASR_RETRY_COUNT = 3
+                best_result = None
+                best_score = -1.0
+                comparison_threshold = TTS_COMPARISON_THRESHOLD if comparison_source == "tts" else 0.9
 
-        log_level = logging.INFO if comparison["matched"] else logging.WARNING
-        logger.log(
-            log_level,
-            "ASR %s: 用例 '%s' | source=%s | threshold=%.2f | "
-            "avg=%.4f cosine=%.4f sequence=%.4f | "
-            "transcript='%s' | comparison_text='%s'",
-            comparison["result"], case_title, comparison_source, comparison_threshold,
-            comparison["average"], comparison["cosine"], comparison["sequence"],
-            transcript[:100], comparison_text[:100],
-        )
-        yield format_sse({
-            "status": "success" if comparison["matched"] else "error",
-            "message": message,
-            "row_index": row_index,
-            "asr_result": comparison["result"],
-            "asr_score": comparison["average"],
-            "asr_cosine": comparison["cosine"],
-            "asr_sequence": comparison["sequence"],
-            "transcribed_text": transcript,
-            "tts_text": tts_text,
-            "reference_text": comparison_text,
-            "reference_path": reference_path,
-            "comparison_source": comparison_source,
-            "audio_path": str(audio_path),
-            "transcript_path": str(transcript_path),
-            "compare_result_path": str(compare_report_path),
-        })
+                for attempt in range(1, ASR_RETRY_COUNT + 1):
+                    await ensure_execution_active(request)
+                    yield format_sse({
+                        "status": "info",
+                        "message": f"--- 第 {attempt}/{ASR_RETRY_COUNT} 次校验 ---",
+                        "segment_index": seg_index,
+                    })
+
+                    # ASR 识别
+                    transcript = asr_service.transcribe_audio(audio_path)
+                    # 应用文本替换规则
+                    transcript_display = TextComparer.apply_substitutions(transcript) if transcript else transcript
+                    transcript_path = asr_service.save_transcript(audio_path, transcript)
+                    yield format_sse({
+                        "status": "info",
+                        "message": f"第 {attempt} 次校验：识别结果 = {transcript_display or '（空）'}",
+                        "transcribed_text": transcript_display,
+                        "transcript_path": str(transcript_path),
+                        "tts_text": tts_text,
+                        "segment_index": seg_index,
+                    })
+
+                    # 比对
+                    comparison = asr_service.compare_transcript(transcript, comparison_text, threshold=comparison_threshold)
+                    compare_report_path = asr_service.save_compare_report(
+                        audio_path, transcript, comparison_text, comparison,
+                    )
+                    message = (
+                        f"段 {seg_index + 1} 第 {attempt} 次: ASR 比对 {comparison['result']}: "
+                        f"平均 {comparison['average'] * 100:.2f}% / "
+                        f"余弦 {comparison['cosine'] * 100:.2f}% / 序列 {comparison['sequence'] * 100:.2f}%"
+                    )
+
+                    log_level = logging.INFO if comparison["matched"] else logging.WARNING
+                    logger.log(
+                        log_level,
+                        "ASR %s: 用例 '%s' 段 %d 第 %d/%d 次 | source=%s | threshold=%.2f | "
+                        "avg=%.4f cosine=%.4f sequence=%.4f | "
+                        "transcript='%s' | comparison_text='%s'",
+                        comparison["result"], case_title, seg_index + 1, attempt, ASR_RETRY_COUNT,
+                        comparison_source, comparison_threshold,
+                        comparison["average"], comparison["cosine"], comparison["sequence"],
+                        transcript[:100], comparison_text[:100],
+                    )
+                    yield format_sse({
+                        "status": "info",
+                        "message": message,
+                        "segment_index": seg_index,
+                        "attempt": attempt,
+                        "asr_result": comparison["result"],
+                        "asr_score": comparison["average"],
+                        "asr_cosine": comparison["cosine"],
+                        "asr_sequence": comparison["sequence"],
+                        "transcribed_text": transcript,
+                        "tts_text": tts_text,
+                        "reference_text": comparison_text,
+                        "reference_path": reference_path,
+                        "comparison_source": comparison_source,
+                        "audio_path": str(audio_path),
+                        "transcript_path": str(transcript_path),
+                        "compare_result_path": str(compare_report_path),
+                    })
+
+                    # 更新最优结果
+                    if comparison["average"] > best_score:
+                        best_score = comparison["average"]
+                        best_result = {
+                            "attempt": attempt,
+                            "transcript": transcript,
+                            "transcript_path": transcript_path,
+                            "comparison": comparison,
+                            "compare_report_path": compare_report_path,
+                        }
+
+                    # 如果已经是满分，提前结束
+                    if comparison["average"] >= 1.0:
+                        logger.info("[ASR] 段 %d 第 %d 次已达到满分，提前结束重试", seg_index + 1, attempt)
+                        break
+
+                # 输出最终最优结果
+                if best_result is None:
+                    yield format_sse({
+                        "status": "error",
+                        "message": f"段 {seg_index + 1}: {ASR_RETRY_COUNT} 次校验均未产生有效结果",
+                        "row_index": row_index,
+                        "segment_index": seg_index,
+                        "total_segments": total_segments,
+                        "asr_result": "FAIL",
+                        "asr_score": None,
+                    })
+                    continue
+
+                best_comparison = best_result["comparison"]
+                # 对最优结果的 transcript 应用文本替换
+                best_transcript_display = TextComparer.apply_substitutions(best_result["transcript"]) if best_result["transcript"] else best_result["transcript"]
+                logger.info(
+                    "[ASR] 段 %d 最优结果: 第 %d 次 | avg=%.4f",
+                    seg_index + 1, best_result["attempt"], best_comparison["average"],
+                )
+                yield format_sse({
+                    "status": "success" if best_comparison["matched"] else "error",
+                    "message": (
+                        f"段 {seg_index + 1}: ASR 比对 {best_comparison['result']} "
+                        f"(3 次中最优: 第 {best_result['attempt']} 次) — "
+                        f"平均 {best_comparison['average'] * 100:.2f}% / "
+                        f"余弦 {best_comparison['cosine'] * 100:.2f}% / "
+                        f"序列 {best_comparison['sequence'] * 100:.2f}%"
+                    ),
+                    "row_index": row_index,
+                    "segment_index": seg_index,
+                    "total_segments": total_segments,
+                    "asr_result": best_comparison["result"],
+                    "asr_score": best_comparison["average"],
+                    "asr_cosine": best_comparison["cosine"],
+                    "asr_sequence": best_comparison["sequence"],
+                    "transcribed_text": best_transcript_display,
+                    "tts_text": tts_text,
+                    "reference_text": comparison_text,
+                    "reference_path": reference_path,
+                    "comparison_source": comparison_source,
+                    "audio_path": str(audio_path),
+                    "transcript_path": str(best_result["transcript_path"]),
+                    "compare_result_path": str(best_result["compare_report_path"]),
+                })
+
+            except ExecutionStopped:
+                logger.warning("[ASR] 执行被用户停止 (段 %d/%d)", seg_index + 1, total_segments)
+                if recorder is not None and recording_started:
+                    recorder.stop_recording()
+                return
+            except AsrRuntimeError as exc:
+                logger.error("[ASR] 运行时错误 (段 %d/%d): %s", seg_index + 1, total_segments, exc)
+                if recorder is not None and recording_started:
+                    recorder.stop_recording()
+                yield format_sse({
+                    "status": "error",
+                    "message": f"段 {seg_index + 1}: {exc}",
+                    "segment_index": seg_index,
+                    "total_segments": total_segments,
+                })
+                continue
+            except Exception as exc:
+                logger.error("[ASR] 未知异常 (段 %d/%d): %s", seg_index + 1, total_segments, exc, exc_info=True)
+                if recorder is not None and recording_started:
+                    recorder.stop_recording()
+                yield format_sse({
+                    "status": "error",
+                    "message": f"段 {seg_index + 1}: 执行 ASR 校验失败: {str(exc)}",
+                    "segment_index": seg_index,
+                    "total_segments": total_segments,
+                })
+                continue
+
     except ExecutionStopped:
         logger.warning("[ASR] 执行被用户停止")
-        if recorder is not None and recording_started:
-            recorder.stop_recording()
         return
-    except AsrRuntimeError as exc:
-        logger.error("[ASR] 运行时错误: %s", exc)
-        if recorder is not None and recording_started:
-            recorder.stop_recording()
-        yield format_sse({
-            "status": "error",
-            "message": str(exc),
-        })
     except Exception as exc:
         logger.error("[ASR] 未知异常: %s", exc, exc_info=True)
-        if recorder is not None and recording_started:
-            recorder.stop_recording()
-        message = f"执行 ASR 用例失败: {str(exc)}"
         yield format_sse({
             "status": "error",
-            "message": message,
+            "message": f"执行 ASR 用例失败: {str(exc)}",
         })
 
 

@@ -61,6 +61,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { showAlert as alert } from '../stores/dialogStore'
 
 const DEVICE_STATUS_EVENT = 'checkpilot:device-updated'
 // 状态管理
@@ -121,13 +122,13 @@ const selectDevice = async (index) => {
       if (data.status === 'success') {
         selectedDevice.value = data.device || ''
         notifyCurrentDeviceChange()
-        alert(t('deviceManagement.alerts.selected'))
+        await alert(t('deviceManagement.alerts.selected'))
       } else {
-        alert(t('deviceManagement.alerts.failed', { detail: data.detail || t('deviceManagement.alerts.unknown') }))
+        await alert(t('deviceManagement.alerts.failed', { detail: data.detail || t('deviceManagement.alerts.unknown') }))
       }
   } catch (error) {
     console.error('选择设备失败:', error)
-    alert(t('deviceManagement.alerts.retry'))
+    await alert(t('deviceManagement.alerts.retry'))
   }
 }
 </script>

@@ -15,6 +15,38 @@ from backend.app.utils.adb_controller import ADBController
 from backend.app.utils.validators import ExcelValidator
 
 
+class CompressAdjacentSequenceTests(unittest.TestCase):
+    def test_merges_adjacent_numeric_repeats(self):
+        self.assertEqual(
+            ExcelService._compress_adjacent_command_sequence("HOME/1/1,HOME/1/1"),
+            "HOME/2/1",
+        )
+
+    def test_preserves_random_repeat_as_is(self):
+        self.assertEqual(
+            ExcelService._compress_adjacent_command_sequence("OK/X:5/1,DOWN/X/3"),
+            "OK/X:5/1,DOWN/X/3",
+        )
+
+    def test_numeric_part_does_not_merge_into_random_part(self):
+        self.assertEqual(
+            ExcelService._compress_adjacent_command_sequence("OK/X:5/1,OK/1/1,OK/2/1"),
+            "OK/X:5/1,OK/3/1",
+        )
+
+    def test_random_part_does_not_merge_into_previous_numeric_part(self):
+        self.assertEqual(
+            ExcelService._compress_adjacent_command_sequence("OK/1/1,OK/X:3/1,OK/1/1"),
+            "OK/1/1,OK/X:3/1,OK/1/1",
+        )
+
+    def test_lowercase_x_also_preserved(self):
+        self.assertEqual(
+            ExcelService._compress_adjacent_command_sequence("OK/x/1,OK/2/1"),
+            "OK/x/1,OK/2/1",
+        )
+
+
 class UpdateCaseFieldsTests(unittest.TestCase):
     def setUp(self):
         self.service = ExcelService()
@@ -339,6 +371,23 @@ class ExcelValidationTests(unittest.TestCase):
 
         self.assertFalse(result['success'])
         self.assertIn("按键名称 'ZEPHYR' 缺少键值映射", result['errors'][0])
+
+    @mock.patch('backend.app.utils.validators.get_runtime_valid_keys', return_value={'HOME', 'CLEARNETFLIX'})
+    @mock.patch('backend.app.utils.validators.get_custom_commands', return_value={'CLEARNETFLIX': 'adb shell am force-stop com.netflix.ninja'})
+    @mock.patch('backend.app.utils.validators.get_keycode_map', return_value={'HOME': 3})
+    def test_validate_accepts_custom_command_key(self, _mock_keycodes, _mock_commands, _mock_valid_keys):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            excel_path = Path(tmp_dir) / 'custom_commands.xlsx'
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.append(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'])
+            worksheet.append([None, None, 'case-1', None, None, 'CLEARNETFLIX/1/1', None, None, None, None])
+            workbook.save(excel_path)
+            workbook.close()
+
+            result = ExcelValidator.validate(str(excel_path))
+
+        self.assertTrue(result['success'], result['errors'])
 
 
 class CustomizedKeyExecutionTests(unittest.TestCase):

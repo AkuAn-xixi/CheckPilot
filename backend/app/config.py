@@ -18,9 +18,9 @@ def _get_runtime_dir() -> Path:
 class Settings:
     """应用配置类"""
 
-    PROJECT_NAME: str = "ADB Control API"
-    VERSION: str = "1.0.0"
-    DESCRIPTION: str = "ADB设备控制和命令执行API"
+    PROJECT_NAME: str = "AutoDeck API"
+    VERSION: str = "1.1.1"
+    DESCRIPTION: str = "AutoDeck 自动测控台：ADB设备控制、Excel测试执行与结果校验API"
 
     CORS_ORIGINS: list = ["*"]
     BUNDLE_DIR: Path = _get_bundle_dir()
@@ -28,7 +28,6 @@ class Settings:
     SCREENSHOT_DIR: Path = WORKING_DIR / "screenshots"
     TEST_CASES_DIR: Path = WORKING_DIR / "test_cases"
     ASR_MODELS_DIR: Path = WORKING_DIR / "asr_models"
-    IMAGE_MODELS_DIR: Path = WORKING_DIR / "image_models"
     REPORTS_DIR: Path = WORKING_DIR / "reports"
     RECORDING_DIR: Path = WORKING_DIR / "recordings"
     LOG_DIR: Path = WORKING_DIR / "log"
@@ -45,6 +44,17 @@ class Settings:
     CAPTURE_CARD_JPEG_QUALITY: int = 75
     CAPTURE_CARD_RECORDING_FPS: int = 30
     RECORDING_MAX_DURATION: int = 180
+
+    # scrcpy 串流配置
+    SCRCPY_ENABLED: bool = True
+    SCRCPY_PATH: str = "scrcpy"  # scrcpy 可执行文件路径，PATH 中有则直接填 "scrcpy"
+    SCRCPY_MAX_SIZE: int = 1024  # 串流分辨率上限（长边像素）
+    SCRCPY_MAX_FPS: int = 30  # 串流帧率上限
+    SCRCPY_VIDEO_CODEC: str = "h264"  # 编码格式：h264 / h265
+    SCRCPY_NO_AUDIO: bool = True
+    SCRCPY_JPEG_QUALITY: int = 80  # MJPEG 转码质量 1-31（FFmpeg 标准，越小质量越高）
+    SCRCPY_IDLE_TIMEOUT: float = 10.0  # 无人消费后自动释放 scrcpy 进程的秒数
+    FFMPEG_PATH: str = "ffmpeg"  # FFmpeg 可执行文件路径
     ADB_TIMEOUT: int = 30
     CUSTOMIZATION_FILE: Path = WORKING_DIR / "customization.json"
 
@@ -69,7 +79,6 @@ class Settings:
         self.WORKING_DIR.mkdir(parents=True, exist_ok=True)
         self.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         self.ASR_MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        self.IMAGE_MODELS_DIR.mkdir(parents=True, exist_ok=True)
         self.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         self.RECORDING_DIR.mkdir(parents=True, exist_ok=True)
         self.LOG_DIR.mkdir(parents=True, exist_ok=True)

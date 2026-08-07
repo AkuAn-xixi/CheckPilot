@@ -15,8 +15,9 @@ _DEFAULT_VALID_KEYS = {
 }
 
 # 系统级占位按键：无论用户的 customization 方案怎么配置，这些都视作"始终合法"。
-# 这类按键不发实际 keyevent（如 ASSERT 是步骤分隔/断言占位符），由执行层识别后跳过。
-_SYSTEM_VALID_KEYS = {'ASSERT'}
+# 这类按键不发实际 keyevent（ASSERT 是断言占位符、NOTASSERT 是反向断言占位符），
+# 由执行层识别后接管校验。
+_SYSTEM_VALID_KEYS = {'ASSERT', 'NOTASSERT'}
 
 _CUSTOMIZATION_FILE = Path(__file__).resolve().parents[1] / "customization.json"
 

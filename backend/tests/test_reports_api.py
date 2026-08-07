@@ -124,6 +124,37 @@ class ReportsApiTests(unittest.TestCase):
             self.assertIn("图标不匹配", html_content)
             self.assertTrue(report["report_url"].endswith(".html"))
 
+    def test_delete_reports_batch(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reports.report_service.reports_root = Path(tmp_dir)
+            reports.report_service.reports_root.mkdir(parents=True, exist_ok=True)
+
+            first = reports.create_excel_batch_report(
+                reports.ExcelBatchReportCreateRequest(
+                    title="批量删除-A",
+                    row_results=[
+                        reports.ExcelBatchCaseResult(row_index=1, case_title="TC-1", verify_result="PASS", score=0.9),
+                    ],
+                )
+            )["report"]
+            second = reports.create_excel_batch_report(
+                reports.ExcelBatchReportCreateRequest(
+                    title="批量删除-B",
+                    row_results=[
+                        reports.ExcelBatchCaseResult(row_index=1, case_title="TC-2", verify_result="FAIL", score=0.4),
+                    ],
+                )
+            )["report"]
+
+            result = reports.report_service.delete_reports(
+                [first["report_id"], second["report_id"], "missing-report-id"]
+            )
+
+            self.assertEqual(len(result["deleted"]), 2)
+            self.assertEqual(len(result["failed"]), 1)
+            self.assertFalse(Path(first["file_path"]).exists())
+            self.assertFalse(Path(second["file_path"]).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

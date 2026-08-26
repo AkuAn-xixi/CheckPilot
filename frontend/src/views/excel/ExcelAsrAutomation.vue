@@ -646,7 +646,6 @@
       <div
         v-if="showValidationResultModal && validationResult"
         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="closeValidationResultModal"
       >
         <div class="bg-white rounded-[24px] shadow-xl p-5 w-[92vw] max-w-4xl max-h-[88vh] overflow-hidden flex flex-col">
           <div class="flex items-start justify-between gap-4 mb-4">
@@ -713,7 +712,6 @@
       <div
         v-if="showCaseEditModal"
         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="closeCaseEditModal"
       >
         <div class="bg-white rounded-lg shadow-xl p-6 w-[92vw] max-w-2xl">
           <div class="flex items-start justify-between gap-4 mb-4">

@@ -257,7 +257,7 @@
         </section>
       </div>
     </section>
-    <div v-if="showCreateModal" class="modal-backdrop" @click.self="showCreateModal = false">
+    <div v-if="showCreateModal" class="modal-backdrop">
       <div class="modal-box">
         <h4 class="modal-title">{{ $t('customization.createModalTitle') }}</h4>
         <input
@@ -275,7 +275,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showDuplicateModal" class="modal-backdrop" @click.self="showDuplicateModal = false">
+    <div v-if="showDuplicateModal" class="modal-backdrop">
       <div class="modal-box">
         <h4 class="modal-title">{{ $t('customization.duplicateModalTitle', { name: selectedScheme }) }}</h4>
         <input
@@ -292,7 +292,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showDeleteConfirm" class="modal-backdrop" @click.self="showDeleteConfirm = false">
+    <div v-if="showDeleteConfirm" class="modal-backdrop">
       <div class="modal-box">
         <h4 class="modal-title">{{ $t('customization.deleteModalTitle') }}</h4>
         <p class="modal-body">{{ $t('customization.deleteModalBody', { name: selectedScheme }) }}</p>
@@ -302,7 +302,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showResetConfirm" class="modal-backdrop" @click.self="showResetConfirm = false">
+    <div v-if="showResetConfirm" class="modal-backdrop">
       <div class="modal-box">
         <h4 class="modal-title">{{ $t('customization.resetKeysTitle') }}</h4>
         <p class="modal-body">{{ $t('customization.resetKeysBody', { name: selectedScheme }) }}</p>
@@ -312,7 +312,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showResetCodesConfirm" class="modal-backdrop" @click.self="showResetCodesConfirm = false">
+    <div v-if="showResetCodesConfirm" class="modal-backdrop">
       <div class="modal-box">
         <h4 class="modal-title">{{ $t('customization.resetCodesTitle') }}</h4>
         <p class="modal-body">{{ $t('customization.resetCodesBody', { name: selectedScheme }) }}</p>

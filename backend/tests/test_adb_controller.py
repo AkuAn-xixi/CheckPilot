@@ -272,6 +272,26 @@ class ReadExcelCommandsRandomRepeatTests(unittest.TestCase):
         self.assertEqual(result["valid_rows"][0]["commands"], ["NOTASSERT/1/1"])
 
     @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_reads_ttstxt_column(self, mock_read_excel):
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "OK/1/1", "preScript": "", "testID": "TC-001", "TTSTXT": "hello world"}
+        ])
+
+        result = self.controller.read_excel_commands("ttstxt.xlsx")
+
+        self.assertEqual(result["valid_rows"][0]["tts_text"], "hello world")
+
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_ttstxt_empty_when_column_missing(self, mock_read_excel):
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "OK/1/1", "preScript": "", "testID": "TC-001"}
+        ])
+
+        result = self.controller.read_excel_commands("no_ttstxt.xlsx")
+
+        self.assertEqual(result["valid_rows"][0]["tts_text"], "")
+
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
     def test_read_excel_commands_accepts_zero_zero_range(self, mock_read_excel):
         mock_read_excel.return_value = pd.DataFrame([
             {"runOption": "Y", "oriStep": "OK/X:(0:0)/1", "preScript": "", "testID": "TC-X0"}

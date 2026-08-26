@@ -3,7 +3,6 @@
     <div
       v-if="dialogState.visible"
       class="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4"
-      @click.self="dialogCancel()"
     >
       <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
         <div class="flex items-start gap-3">

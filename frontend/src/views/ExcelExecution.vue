@@ -800,7 +800,6 @@
               <div
                 v-if="showValidationResultModal && validationResult"
                 class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                @click.self="closeValidationResultModal"
               >
                 <div class="bg-white rounded-[24px] shadow-xl p-5 w-[92vw] max-w-4xl max-h-[88vh] overflow-hidden flex flex-col">
                   <div class="flex items-start justify-between gap-4 mb-4">
@@ -867,7 +866,6 @@
               <div
                 v-if="showScreenshotModal"
                 class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                @click.self="closeScreenshotModal"
               >
                 <div class="bg-white rounded-lg shadow-xl p-4 w-[95vw] max-w-[95vw] h-[90vh] max-h-[90vh] overflow-hidden flex flex-col">
                   <div class="flex justify-between items-center mb-2">
@@ -1064,7 +1062,6 @@
               <div
                 v-if="showVerifyImageModal"
                 class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]"
-                @click.self="closeVerifyImagePreviewModal"
               >
                 <div class="bg-white rounded-xl shadow-xl p-4 w-auto max-w-xl max-h-[70vh] overflow-hidden flex flex-col">
                   <div class="flex justify-between items-center mb-2 shrink-0">
@@ -1118,7 +1115,6 @@
               <div
                 v-if="showCaseEditModal"
                 class="fixed inset-0 bg-black bg-opacity-50 flex items-stretch justify-center p-4 z-50"
-                @click.self="closeCaseEditModal"
               >
                 <div class="bg-white rounded-2xl shadow-xl flex flex-col w-full max-w-[min(1760px,98vw)] max-h-[94vh] m-auto">
                   <header class="flex-shrink-0 flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-slate-200">
@@ -1536,7 +1532,7 @@
 
         <!-- 校验文件夹提醒弹窗 -->
         <Transition name="vfa-fade">
-          <div v-if="verifyFolderAlertVisible" class="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999]" @click.self="onVerifyFolderContinue">
+          <div v-if="verifyFolderAlertVisible" class="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999]">
             <div class="excel-vfa-card">
               <div class="excel-vfa-icon">📂</div>
               <h3 class="excel-vfa-title">{{ $t('excelExecution.alerts.selectVerifyFolderFirst') }}</h3>

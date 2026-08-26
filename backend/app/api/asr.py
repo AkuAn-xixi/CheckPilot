@@ -272,7 +272,8 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
         yield format_sse({"status": "error", "message": str(exc)})
         return
 
-    reference = asr_service.find_reference(case_title)
+    # 比对文本优先取 Excel M 列 TTSTXT，其次设备日志 TTS 输出
+    reference_text = executed_row.get("tts_text", "") or ""
     total_segments = len(segments)
 
     try:
@@ -286,27 +287,19 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
             "message": f"开始执行 ASR 用例: {case_title} (共 {total_segments} 个校验段)"
         })
 
-        if reference is not None:
+        if reference_text:
             yield format_sse({
                 "status": "info",
-                "message": f"已加载参考文本: {reference['path']}"
+                "message": f"已加载参考文本(Excel TTSTXT): {reference_text}"
             })
         else:
-            ref_root = asr_service.reference_root
-            ref_dir_ok = ref_root.exists() and ref_root.is_dir()
-            ref_files = [f.stem for f in ref_root.glob("*.txt")] if ref_dir_ok else []
-            normalized_key = asr_service._normalize_reference_key(case_title)
             yield format_sse({
                 "status": "info",
-                "message": (
-                    f"未找到用例 '{case_title}' 的参考文本 (normalized: '{normalized_key}')，"
-                    f"参考目录: {ref_root} (存在={ref_dir_ok}, 文件数={len(ref_files)})，"
-                    f"如捕获到 TTS 输出则将使用 TTS 文本进行比对"
-                ),
+                "message": "Excel 未填写 TTSTXT 参考文本，如捕获到 TTS 输出则将使用 TTS 文本进行比对",
             })
             logger.info(
-                "ASR 参考文本未匹配: 用例 '%s' (normalized: '%s') | 参考目录: %s (exists=%s, txt_count=%d)",
-                case_title, normalized_key, ref_root, ref_dir_ok, len(ref_files),
+                "ASR 参考文本为空(Excel TTSTXT 未填写): 用例 '%s'，改用 TTS 文本兜底",
+                case_title,
             )
 
         # 逐段执行录音→TTS捕获→ASR→比对
@@ -400,9 +393,8 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     "segment_index": seg_index,
                 })
 
-                # 确定比对文本
-                reference_text = (reference or {}).get("text", "").strip() if reference else ""
-                reference_path = (reference or {}).get("path", "") if reference else ""
+                # 确定比对文本：Excel TTSTXT 优先，其次 TTS 日志文本
+                reference_path = "Excel TTSTXT" if reference_text else ""
                 comparison_text = reference_text or tts_text
                 comparison_source = "reference" if reference_text else "tts"
 

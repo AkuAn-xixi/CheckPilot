@@ -2,7 +2,6 @@
   <div
     v-if="visible"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
-    @click.self="$emit('cancel')"
   >
     <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
       <div class="flex items-start gap-3 mb-4">

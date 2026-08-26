@@ -1436,6 +1436,15 @@ class ADBController:
                 stderr=subprocess.DEVNULL,
             )
             self._recording_process = process
+            # 短暂等待后确认 screenrecord 在设备端真正启动。
+            # 若设备不支持/分辨率不兼容，screenrecord 会立即退出，避免"假启动"导致后续无视频。
+            time.sleep(1.0)
+            if process.poll() is not None:
+                logger.error("[ADB] ✗ screenrecord 启动后立即退出 (exit=%s)，可能设备不支持或分辨率不兼容", process.poll())
+                console_log("录屏启动失败：screenrecord 立即退出，请检查设备是否支持录屏")
+                self._recording_process = None
+                self._recording_remote_path = None
+                return False
             logger.info("[ADB] 录屏已启动: remote=%s, pid=%d, duration=%ds",
                         remote_path, process.pid, duration)
             return True
@@ -1458,40 +1467,54 @@ class ADBController:
         self._recording_process = None
         self._recording_remote_path = None
 
-        # 发送 SIGTERM 停止 screenrecord
+        # 发送 SIGTERM 停止 screenrecord，等它优雅退出并落盘。
+        # 录制越久（多段校验）收尾越慢，给足 10s 避免直接 kill 导致 mp4 未收尾损坏。
         try:
             process.terminate()
-            process.wait(timeout=5)
+            process.wait(timeout=10)
         except Exception:
             try:
                 process.kill()
             except Exception:
                 pass
 
-        # 等待一小段时间让文件写入完成
-        time.sleep(0.5)
+        # 多等一会让 screenrecord 完成文件收尾
+        time.sleep(1.0)
 
-        # 拉取文件到本地
+        # 拉取文件到本地（失败重试；长录制文件较大，超时给到 60s）
         ts = int(time.time() * 1000)
         local_path = settings.RECORDING_DIR / f"recording_{ts}.mp4"
-        pull_cmd = self._adb_command("pull", remote_path, str(local_path))
-        try:
-            result = subprocess.run(
-                pull_cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0 and local_path.exists():
+        for attempt in range(3):
+            try:
+                result = subprocess.run(
+                    self._adb_command("pull", remote_path, str(local_path)),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                self._remove_local_file(local_path)
+                logger.warning("[ADB] 拉取录屏超时 (尝试 %d/3): %s", attempt + 1, remote_path)
+                time.sleep(1.0)
+                continue
+            except Exception as e:
+                self._remove_local_file(local_path)
+                logger.warning("[ADB] 拉取录屏异常 (尝试 %d/3): %s", attempt + 1, e)
+                time.sleep(1.0)
+                continue
+
+            if result.returncode == 0 and local_path.exists() and local_path.stat().st_size > 0:
                 logger.info("[ADB] 录屏文件已拉取: %s", local_path)
                 self._cleanup_remote_file(remote_path)
                 return str(local_path)
-            else:
-                logger.error("[ADB] 拉取录屏文件失败: %s", result.stderr)
-        except Exception as e:
-            logger.error("[ADB] 拉取录屏文件异常: %s", e)
 
-        self._cleanup_remote_file(remote_path)
+            self._remove_local_file(local_path)
+            logger.warning("[ADB] 拉取录屏失败或文件无效 (尝试 %d/3): %s, stderr=%s",
+                           attempt + 1, remote_path, (result.stderr or '').strip()[:200])
+            time.sleep(1.0)
+
+        # 拉取失败时保留设备端文件，便于排查/重试
+        logger.error("[ADB] ✗ 拉取录屏文件失败: %s（已保留设备端文件）", remote_path)
         return None
 
     @staticmethod
@@ -1619,6 +1642,7 @@ class ADBController:
                         step = ''
                         verify_image = ''
                         test_result = ''
+                        tts_text = ''
 
                         if 'testID' in row:
                             title = self._normalize_excel_text(row['testID'])
@@ -1634,12 +1658,17 @@ class ADBController:
                         if 'testResult' in row:
                             test_result = self._normalize_excel_text(row['testResult'])
 
+                        # M 列 TTSTXT：用户提供的 TTS 期望文本，供 ASR 比对优先使用
+                        if 'TTSTXT' in row:
+                            tts_text = self._normalize_excel_text(row['TTSTXT'])
+
                         all_valid_rows.append({
                             "row": index+2,
                             "title": title,
                             "step": step,
                             "verify_image": verify_image,
                             "test_result": test_result,
+                            "tts_text": tts_text,
                             "oriStep": ori_step,
                             "preScript": pre_script,
                             "commands": combined_commands

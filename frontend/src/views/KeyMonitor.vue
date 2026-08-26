@@ -833,7 +833,7 @@
       </div>
     </div>
 
-    <div v-if="schemeModalKind" class="key-monitor-modal-backdrop" @click.self="closeSchemeModal">
+    <div v-if="schemeModalKind" class="key-monitor-modal-backdrop">
       <div class="key-monitor-modal-box">
         <h4 class="key-monitor-modal-title">
           {{ $t(`keyMonitor.schemes.modal.${schemeModalKind}.title`, schemeModalI18nParams) }}
@@ -908,7 +908,7 @@
       @cancel="cancelUpload"
     />
 
-    <div v-if="assertModalVisible" class="key-monitor-modal-backdrop" @click.self="cancelAssertModal">
+    <div v-if="assertModalVisible" class="key-monitor-modal-backdrop">
       <div class="key-monitor-modal-box">
         <h4 class="key-monitor-modal-title">{{ $t('keyMonitor.assertModal.title') }}</h4>
         <p class="key-monitor-modal-body">{{ $t('keyMonitor.assertModal.body') }}</p>
@@ -930,7 +930,7 @@
     </div>
 
     <!-- 直接写入 Assert 的弹窗 -->
-    <div v-if="directAssertModalVisible" class="key-monitor-modal-backdrop" @click.self="cancelDirectAssertModal">
+    <div v-if="directAssertModalVisible" class="key-monitor-modal-backdrop">
       <div class="key-monitor-modal-box">
         <h4 class="key-monitor-modal-title">{{ $t('keyMonitor.directAssertModal.title') }}</h4>
         <p class="key-monitor-modal-body">{{ $t('keyMonitor.directAssertModal.body') }}</p>

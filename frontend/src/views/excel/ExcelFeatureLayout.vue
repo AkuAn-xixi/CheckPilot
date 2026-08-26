@@ -35,7 +35,7 @@
       </div>
     </section>
 
-    <div v-if="showNoDeviceModal" class="modal-backdrop" @click.self="dismissNoDeviceModal">
+    <div v-if="showNoDeviceModal" class="modal-backdrop">
       <div class="modal-box">
         <div class="modal-icon">⚠️</div>
         <h4 class="modal-title">{{ $t('excelDirectory.alerts.noDeviceTitle') }}</h4>

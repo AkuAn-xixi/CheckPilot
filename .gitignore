@@ -57,3 +57,7 @@ reports/
 image_models/
 .venv-py314-freeze.txt
 .build_tools/
+
+# 本地打包/测试产物
+release/
+test_cases/

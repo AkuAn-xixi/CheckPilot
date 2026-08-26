@@ -439,7 +439,7 @@ async def execute_commands_stream(
 
         注意：trigger 命令已由调用方执行过，此处不再重复发送。
         """
-        case_title = row_data.get("title") or f"第 {row_index} 行"
+        case_title = executed_row.get("title") or f"第 {row_index} 行"
         controller = get_controller()
         recorder = None
         recording_started = False
@@ -476,9 +476,8 @@ async def execute_commands_stream(
             transcript = asr_service.transcribe_audio(audio_path)
             transcript_path = asr_service.save_transcript(audio_path, transcript)
 
-            # 比对
-            reference = asr_service.find_reference(case_title)
-            reference_text = (reference or {}).get("text", "").strip() if reference else ""
+            # 比对：优先 Excel M 列 TTSTXT，其次 TTS 日志文本
+            reference_text = executed_row.get("tts_text", "") or ""
             comparison_text = reference_text or tts_text
             comparison_source = "reference" if reference_text else "tts"
 

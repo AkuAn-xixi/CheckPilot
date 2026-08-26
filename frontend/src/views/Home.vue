@@ -163,7 +163,7 @@
       </div>
     </section>
 
-    <div v-if="showChangelog" class="changelog-backdrop" @click.self="dismissChangelog">
+    <div v-if="showChangelog" class="changelog-backdrop">
       <div class="changelog-modal">
         <div class="changelog-header">
           <h4 class="changelog-title">{{ $t('home.changelogTitle') }}</h4>

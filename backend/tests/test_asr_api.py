@@ -66,14 +66,13 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_asr_commands_stream_emits_compare_result(self):
         request = FakeRequest()
-        valid_rows = [{"title": "case-1", "commands": ["HOME/1/1", "OK/1/1"]}]
+        valid_rows = [{"title": "case-1", "commands": ["HOME/1/1", "OK/1/1"], "tts_text": "hello world"}]
         recorder = FakeRecorder()
         fake_controller = mock.Mock()
         fake_controller.get_last_tts_text.return_value = "tts sample text"
 
         with mock.patch.object(asr.asr_service, "get_active_model", return_value={"name": "demo", "path": "demo"}), \
              mock.patch.object(asr.asr_service, "get_runtime_dependency_status", return_value={"missing": [], "ready": True, "available": {}}), \
-             mock.patch.object(asr.asr_service, "find_reference", return_value={"path": "references/case-1.txt", "text": "hello world"}), \
              mock.patch.object(asr.asr_service, "create_recorder", return_value=recorder), \
              mock.patch.object(asr.asr_service, "save_audio_recording", return_value="audio/case-1.wav"), \
              mock.patch.object(asr.asr_service, "transcribe_audio", return_value="hello world"), \
@@ -118,7 +117,6 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(asr.asr_service, "get_active_model", return_value={"name": "demo", "path": "demo"}), \
              mock.patch.object(asr.asr_service, "get_runtime_dependency_status", return_value={"missing": [], "ready": True, "available": {}}), \
-             mock.patch.object(asr.asr_service, "find_reference", return_value={"path": "references/case-1.txt", "text": "hello world"}), \
              mock.patch.object(asr.asr_service, "create_recorder", return_value=recorder), \
              mock.patch.object(asr.asr_service, "save_audio_recording", return_value="audio/case-1.wav"), \
              mock.patch.object(asr.asr_service, "transcribe_audio", return_value="hello world"), \
@@ -155,7 +153,6 @@ class AsrExecutionStreamTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(asr.asr_service, "get_active_model", return_value={"name": "demo", "path": "demo"}), \
              mock.patch.object(asr.asr_service, "get_runtime_dependency_status", return_value={"missing": [], "ready": True, "available": {}}), \
-             mock.patch.object(asr.asr_service, "find_reference", return_value=None), \
              mock.patch.object(asr.asr_service, "create_recorder", return_value=recorder), \
              mock.patch.object(asr.asr_service, "save_audio_recording", return_value="audio/case-1.wav"), \
              mock.patch.object(asr.asr_service, "transcribe_audio", return_value="hello world"), \

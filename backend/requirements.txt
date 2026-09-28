@@ -1,4 +1,4 @@
-fastapi
+﻿fastapi
 uvicorn
 pydantic
 pandas
@@ -10,3 +10,22 @@ pygrabber; sys_platform == "win32"
 imageio[ffmpeg]
 noisereduce
 scipy
+
+# ──────────────────────────────────────────────────────────────
+# ASR 可选依赖（录音、模型推理与在线下载）
+#
+# 注意：torch 请先单独从官方 CPU 源安装，避免 pip 从 PyPI 拉取
+# 体积巨大的 CUDA 版：
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 装完后 pip install -r requirements.txt 会自动跳过该行。
+# qwen_asr / transformers / librosa 分别对应 Qwen3-ASR 与
+# Cohere Transcribe 两种后端，只用一个后端也可按需删减。
+# ──────────────────────────────────────────────────────────────
+sounddevice
+torch
+qwen-asr
+transformers
+librosa
+soundfile
+huggingface-hub
+tqdm

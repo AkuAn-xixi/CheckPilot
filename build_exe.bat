@@ -146,6 +146,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem 运行期配置必须与 exe 同级：config.py 的 WORKING_DIR 冻结后即 exe 所在目录，
+rem 而 asr_service 读取这两个文件时没有 BUNDLE_DIR 回退，缺失会导致规则静默失效。
+for %%F in (asr_text_substitutions.json asr_hotwords.txt) do (
+  if exist "%%F" (
+    copy /y "%%F" "dist\%%F" >nul
+    echo - Copied "%%F" to dist\
+  ) else (
+    echo - Warning: "%%F" not found in project root, skipped
+  )
+)
+
 echo.
 echo Build completed:
 echo - Executable: "%~dp0dist\AutoDeck.exe"

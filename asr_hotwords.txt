@@ -1,0 +1,23 @@
+# Qwen3-ASR 识别热词表：每行一个词/短语，识别时经 context 注入做词汇偏置。
+# 以 # 开头的行是注释；空行忽略。短语内部空格原样保留（如 "app setting"）。
+# 保存文件后下一次识别自动生效，无需重启后端；清空全部词条即恢复原始基线。
+# 上限：100 词，单条最长 50 字符，超出部分被忽略。
+#
+# 示例（取消注释即启用）：
+app setting
+HOME
+Apps
+Netflix
+Whale
+Whale TV
+Prime Video
+All Setting
+banner one
+banner two
+banner three
+banner four
+banner five
+unmute
+Enter Code 
+Set Code
+code

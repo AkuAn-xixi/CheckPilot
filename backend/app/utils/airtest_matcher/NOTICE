@@ -1,0 +1,36 @@
+airtest 图像匹配内核（aircv）移植说明
+=====================================
+
+本目录下的以下文件移植自 AirtestProject/Airtest 仓库的 airtest/aircv 子模块：
+
+  - errors.py                        <- airtest/aircv/error.py
+  - image_ops.py                     <- airtest/aircv/utils.py（仅取所需 helper）
+  - confidence.py                    <- airtest/aircv/cal_confidence.py
+  - template_matching.py             <- airtest/aircv/template_matching.py
+  - multiscale_template_matching.py   <- airtest/aircv/multiscale_template_matching.py
+
+上游地址：https://github.com/AirtestProject/Airtest
+版权归属：Copyright (c) NetEase Games, AirtestProject
+许可协议：Apache License 2.0
+          http://www.apache.org/licenses/LICENSE-2.0
+
+本项目对移植代码所做的修改（均为适配用途，未改变匹配算法本身）：
+
+  1. 移除 ``airtest.core.*`` 与 ``airtest.utils.logger`` 依赖，改用本项目的
+     ``logging.getLogger(__name__)``；不再依赖全局 ``Settings`` 单例，阈值、
+     比色开关、缩放参数全部逐次传入，避免并发执行时互相污染。
+  2. 移除 PIL / 文件读写 / base64 相关 helper，输入统一为 BGR ndarray，
+     ``cv2.imread`` 与 base64 解码后的图像均可直接传入。
+  3. 丢弃 ``screen_recorder.py``（依赖 mss/ffmpeg）、``keypoint_matching_contrib.py``
+     （SURF）、``sift.py`` 与 ``keypoint_matching.py``（关键点策略，暂未使用），
+     以及 ``MultiScaleTemplateMatchingPre``（依赖 Airtest IDE 录制元数据）；
+     基类上仅供该子类使用的 ``record_pos`` / ``resolution`` 构造参数、以及
+     ``_resize_by_ratio`` 的 ``templ_min``、``_org_size`` 的 ``tr`` 等从未被读取的
+     形参一并移除。
+  4. 策略只保留 ``mstpl`` / ``tpl``：opencv-python-headless 5.0 不再提供
+     BRISK / KAZE / AKAZE 检测器（实测 ``hasattr(cv2, "BRISK_create")`` 为 False），
+     故不移植 airtest 默认策略里的 ``brisk`` 分支。
+  5. 新增 ``last_confidence`` / ``last_result`` 字段：上游在 confidence 低于阈值时
+     直接返回 None、丢失实际分数，本项目需把「未命中时的真实分数」写进报告以便
+     标定阈值，故在阈值判断前额外记录一次。该改动不改变判定结果。
+  6. 按本项目规范补充类型注解、Google 风格 docstring 与中文注释。

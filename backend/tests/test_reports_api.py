@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from backend.app.api import reports
+from backend.app.services.report_service import report_service
 
 
 class ReportsApiTests(unittest.TestCase):
@@ -158,3 +159,46 @@ class ReportsApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ExcelCompareDetailRenderingTests(unittest.TestCase):
+    """比对明细的渲染：airtest 的坐标键要能显示出来，引擎名要按展示名渲染。"""
+
+    def _render(self, row: dict) -> str:
+        return report_service._render_excel_case_detail(row)
+
+    def test_airtest_coordinates_are_rendered(self):
+        html = self._render({
+            "status": "PASS",
+            "compare_engine": "airtest",
+            "compare_details": {
+                "score": 0.97,
+                "confidence": 0.97,
+                "match_rect_x": 120,
+                "match_rect_y": 340,
+                "match_rect_w": 200,
+                "match_rect_h": 60,
+            },
+        })
+
+        self.assertIn("匹配区域 X", html)
+        self.assertIn("120", html)
+        self.assertIn("匹配区域高", html)
+        self.assertIn("Airtest", html)
+
+    def test_opencv_row_has_no_coordinate_rows(self):
+        """opencv 结果里没有坐标键，报告不应出现空的坐标行。"""
+        html = self._render({
+            "status": "PASS",
+            "compare_engine": "opencv",
+            "compare_details": {"score": 0.9, "template_score": 0.92},
+        })
+
+        self.assertIn("OpenCV", html)
+        self.assertNotIn("匹配区域 X", html)
+
+    def test_engine_label_falls_back_to_opencv(self):
+        self.assertEqual(report_service._engine_label("airtest"), "Airtest")
+        self.assertEqual(report_service._engine_label("opencv"), "OpenCV")
+        self.assertEqual(report_service._engine_label("AIRTEST"), "Airtest")
+        self.assertEqual(report_service._engine_label(None), "OpenCV")
+        self.assertEqual(report_service._engine_label(""), "OpenCV")

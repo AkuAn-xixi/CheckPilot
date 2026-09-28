@@ -41,6 +41,13 @@
               {{ $t('common.loading') }}
             </div>
 
+            <div v-else-if="deviceLoadError" class="device-empty-state">
+              <p class="device-empty-hint">{{ $t('home.deviceQueryFailed') }}</p>
+              <button type="button" class="btn btn-secondary" @click="refreshDevicePanel">
+                {{ $t('common.retry') }}
+              </button>
+            </div>
+
             <div v-else-if="devices.length" class="device-list">
               <article
                 v-for="(device, index) in devices"
@@ -202,6 +209,9 @@ const PLATFORM_AUTH_EVENT = 'checkpilot:platform-auth-updated'
 const DEVICE_PANEL_QUERY_VALUE = 'device-hub'
 const devices = ref([])
 const currentDevice = ref('')
+// 查询失败（后端无响应/超时）与"真的没有设备"必须分开：前者若按空列表渲染，
+// 界面会显示"未发现设备"，与真实情况相反且极难排查。
+const deviceLoadError = ref(false)
 const deviceHubPanel = ref(null)
 const loading = ref(false)
 const selectingDevice = ref('')
@@ -292,6 +302,9 @@ const refreshDevicePanel = async () => {
 }
 
 const FETCH_TIMEOUT_MS = 8000
+// 设备列表要跑 ``adb devices``，服务端最坏耗时是 2×5s 扫描 + 0.5s 重试间隔 = 10.5s，
+// 客户端超时必须长于它，否则会把"后端慢"误判成"没有设备"。
+const DEVICE_LIST_TIMEOUT_MS = 12000
 
 const fetchWithTimeout = async (input, init = {}, timeoutMs = FETCH_TIMEOUT_MS) => {
   const controller = new AbortController()
@@ -365,12 +378,14 @@ watch(
 
 const loadDevices = async () => {
   loading.value = true
+  deviceLoadError.value = false
   try {
-    const response = await fetchWithTimeout('/api/devices/list')
+    const response = await fetchWithTimeout('/api/devices/list', {}, DEVICE_LIST_TIMEOUT_MS)
     const data = await response.json()
     devices.value = Array.isArray(data.devices) ? data.devices : []
   } catch (error) {
-    devices.value = []
+    // 保留上一次的列表，由 deviceLoadError 说明这次是查询失败，而不是清成"无设备"
+    deviceLoadError.value = true
     console.error(t('deviceManagement.alerts.failed', { detail: error?.message || error }), error)
   } finally {
     loading.value = false
@@ -781,6 +796,10 @@ const logoutPlatformAuth = async () => {
   border: 1px dashed rgba(148, 163, 184, 0.28);
   color: #6b7280;
   line-height: 1.6;
+}
+
+.device-empty-hint {
+  margin: 0 0 12px;
 }
 
 .hero-label,

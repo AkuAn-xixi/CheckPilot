@@ -1,59 +1,47 @@
 """图片验证服务模块"""
 import base64
 import json
+import logging
 from typing import Any, Dict, Optional
 
 import cv2
 import numpy as np
 
 from ..config import settings
+from ..models.verify_config import (
+    ENGINE_OPENCV,
+    VerifyConfig,
+    normalize_verify_config,
+)
+from .verify_engines import build_engine, register_engine
 
-# 颜色相似度下限默认值：形状/结构匹配但颜色明显不同的按钮（如同一按钮换主题色）
-# 不应被判为匹配。取适中值 0.4：同一按钮的明暗差异（HSV 直方图忽略 V）与
-# 轻微色差仍能通过（同图基线实测 ≥0.72），色相明显不同（≥20° 偏移，实测 ≤0.31）
-# 则判不匹配。可通过执行设置里的 color_min_similarity / color_weight 覆盖。
-DEFAULT_COLOR_MIN_SIMILARITY = 0.4
-DEFAULT_COLOR_WEIGHT = 0.2
-DEFAULT_FEATURE_MIN_SIMILARITY = 0.3
+_log = logging.getLogger(__name__)
+
 # 最终分固定权重（颜色权重可配置，模板权重 = 剩余部分）
 STRUCTURE_WEIGHT = 0.2
 FEATURE_WEIGHT = 0.2
 
 
-def _load_verify_config() -> Dict[str, float]:
+def _load_verify_config() -> Dict[str, Any]:
     """读取客制化配置中的图片校验参数；无配置或非法时回落默认值。
 
-    返回 color_min_similarity / color_weight / feature_min_similarity 三项。
+    返回归一化后的完整校验配置（引擎选择、颜色三参数、airtest 三参数）。
     直接读 customization.json，避免导入 backend.app.api.customization：
     该模块会连带 import openpyxl，首次调用会卡 ~1.6s。
     """
-    defaults = {
-        "color_min_similarity": DEFAULT_COLOR_MIN_SIMILARITY,
-        "color_weight": DEFAULT_COLOR_WEIGHT,
-        "feature_min_similarity": DEFAULT_FEATURE_MIN_SIMILARITY,
-    }
     try:
         path = settings.CUSTOMIZATION_FILE
         if not path.exists():
-            return defaults
+            return normalize_verify_config(None).to_dict()
 
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        return normalize_verify_config(data).to_dict()
+    except Exception as e:
+        # 配置损坏不应让校验整体失败，回落默认值但留下线索
+        _log.warning("读取图片校验配置失败，改用默认值: %s", e)
+        return normalize_verify_config(None).to_dict()
 
-        def _clamp01(value, default: float) -> float:
-            try:
-                parsed = float(value)
-            except (TypeError, ValueError):
-                return default
-            return parsed if 0.0 <= parsed <= 1.0 else default
-
-        return {
-            "color_min_similarity": _clamp01(data.get("color_min_similarity"), DEFAULT_COLOR_MIN_SIMILARITY),
-            "color_weight": _clamp01(data.get("color_weight"), DEFAULT_COLOR_WEIGHT),
-            "feature_min_similarity": _clamp01(data.get("feature_min_similarity"), DEFAULT_FEATURE_MIN_SIMILARITY),
-        }
-    except Exception:
-        return defaults
 
 
 class ImageVerifier:
@@ -361,7 +349,8 @@ class ImageVerifier:
         image_array = np.frombuffer(image_bytes, dtype=np.uint8)
         return cv2.imdecode(image_array, cv2.IMREAD_COLOR)
 
-    def _build_result(self, img_screen, img_icon, threshold: float) -> Dict[str, Any]:
+    def build_result(self, img_screen, img_icon, threshold: float) -> Dict[str, Any]:
+        """opencv 融合打分引擎的实现（同时作为该引擎对外的 match 入口）。"""
         final_score, template_score, color_score, feature_score, structure_score = self.multi_signal_match(img_screen, img_icon)
         required_score = float(threshold)
         strict_match = (
@@ -455,7 +444,7 @@ class ImageVerifier:
                     "matched": False
                 }
 
-            return self._build_result(img_screen, img_icon, threshold)
+            return self._dispatch(img_screen, img_icon, threshold)
         except Exception as e:
             return {
                 "success": False,
@@ -486,7 +475,7 @@ class ImageVerifier:
                     "matched": False
                 }
 
-            return self._build_result(img_screen, img_icon, threshold)
+            return self._dispatch(img_screen, img_icon, threshold)
         except Exception as e:
             return {
                 "success": False,
@@ -495,7 +484,44 @@ class ImageVerifier:
                 "matched": False
             }
 
+    def _dispatch(self, img_screen, img_icon, threshold: float) -> Dict[str, Any]:
+        """按全局配置选择校验引擎。
+
+        Args:
+            img_screen: 截图（BGR ndarray）。
+            img_icon: 参考图（BGR ndarray）。
+            threshold: 请求级阈值，仅 opencv 引擎使用。
+
+        Returns:
+            引擎产出的 canonical 结果字典。
+        """
+        config = VerifyConfig(**_load_verify_config())
+        engine = build_engine(config.verify_engine, config)
+        _log.debug("图片校验使用引擎 %s", engine.name)
+        return engine.match(img_screen, img_icon, threshold)
+
+
+class OpenCvEngine:
+    """现有融合打分引擎的适配器。
+
+    校验算法本身仍在 :class:`ImageVerifier`，这里只是让它符合
+    :class:`~.verify_engines.VerifyEngine` 接口，从而可被注册表分派。
+    """
+
+    name = ENGINE_OPENCV
+
+    def match(self, screen, template, threshold: float) -> Dict[str, Any]:
+        """执行一次融合打分校验。"""
+        return image_verifier.build_result(screen, template, threshold)
+
+
+def _create_opencv_engine(config: VerifyConfig) -> OpenCvEngine:
+    """opencv 引擎工厂：其参数在打分时按需读盘，故忽略传入的配置。"""
+    return OpenCvEngine()
+
+
 image_verifier = ImageVerifier()
+register_engine(ENGINE_OPENCV, _create_opencv_engine)
 
 def verify_image_match(screen_img_path: str, icon_img_path: str, threshold: float = 0.9) -> Dict[str, Any]:
     """验证图片匹配的便捷函数"""
@@ -505,6 +531,15 @@ def verify_image_match(screen_img_path: str, icon_img_path: str, threshold: floa
 def verify_image_base64_match(screen_img_path: str, icon_img_base64: str, threshold: float = 0.9) -> Dict[str, Any]:
     """验证 base64 图片匹配的便捷函数"""
     return image_verifier.verify_base64(screen_img_path, icon_img_base64, threshold)
+
+
+def get_active_engine_name() -> str:
+    """当前配置选定的校验引擎名。
+
+    供「还没走到比对就失败」的错误路径标注引擎用 —— 那些分支拿不到
+    ``verify_result['engine']``，若写死 opencv，切到 airtest 后报告会显示错误的引擎名。
+    """
+    return _load_verify_config()["verify_engine"]
 
 
 def format_score_breakdown(verify_result: Dict[str, Any]) -> str:

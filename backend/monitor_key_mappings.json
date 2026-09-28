@@ -6,10 +6,12 @@
     },
     "公版": {
       "00C7": "AUDIO",
+      "FIND": "NETFLIX",
       "HOMEPAGE": "HOME",
       "SCAN_C0086": "FILES",
       "SCAN_C00F6": "SETTING",
-      "SELECT": "OK"
+      "SELECT": "OK",
+      "VOICECOMMAND": "HOME"
     },
     "默认": {
       "00FC": "SOURCE",

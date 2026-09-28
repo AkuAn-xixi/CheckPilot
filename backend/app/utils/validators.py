@@ -4,6 +4,7 @@ from collections import Counter
 from typing import Dict, List, Any
 from ...FieldValidation import get_valid_keys as get_runtime_valid_keys
 from .adb_controller import get_keycode_map, get_custom_commands, NON_EXECUTABLE_KEYS, _parse_key_and_hold, is_valid_repeat_spec
+from .command_aliases import expand_command_aliases, load_command_aliases, split_command_segments
 from .path_resolver import resolve_image_file
 
 VALID_KEYS = get_runtime_valid_keys()
@@ -29,6 +30,9 @@ class ExcelValidator:
             for key in set(get_keycode_map().keys()) | set(get_custom_commands().keys())
             if str(key).strip()
         }
+        # 别名按展开后的真实按键串校验，逻辑名本身不该被报成"按键名称无效"；
+        # 反过来，别名指向的展开串里若有未知键，也会在这里被如实报出来。
+        command_aliases = load_command_aliases(file_path)
 
         c_values = []
         for i in range(2, sheet.max_row + 1):
@@ -50,7 +54,7 @@ class ExcelValidator:
                 if cell_value.strip().endswith(","):
                     errors.append(f"{col}{row} 结尾有多余的逗号: '{cell_value.strip()}'")
 
-                commands = [cmd.strip() for cmd in cell_value.split(",") if cmd.strip()]
+                commands = expand_command_aliases(split_command_segments(cell_value), command_aliases)
                 for cmd in commands:
                     if cmd.upper() in ASR_META_COMMANDS:
                         continue

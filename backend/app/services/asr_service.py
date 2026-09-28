@@ -10,6 +10,7 @@ import shutil
 import sys
 import wave
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -49,6 +50,47 @@ COHERE_DEFAULT_MODEL_NAME = "Cohere-Transcribe-03-2026"
 COHERE_DEFAULT_REPO_ID = "CohereLabs/cohere-transcribe-03-2026"
 COHERE_TARGET_SAMPLE_RATE = 16000
 
+#: Qwen3-ASR context 热词词表文件（与 asr_text_substitutions.json 同目录同命运；
+#: 每行一个词/短语，# 开头为注释行，保存后下一次识别自动生效，无需重启）
+ASR_HOTWORDS_FILENAME = "asr_hotwords.txt"
+#: context 词表上限：词条数 / 单条字符数（防 prompt 膨胀）
+MAX_CONTEXT_WORDS = 100
+MAX_CONTEXT_WORD_CHARS = 50
+#: context 提示串前缀（Qwen3-ASR 生态通用词汇偏置写法）
+CONTEXT_PROMPT_PREFIX = "Vocabulary: "
+#: 静音判定上限（RMS，幅度已归一到 [-1, 1]）：低于此值视为没录到语音，跳过识别。
+#: 实测有效录音 RMS ≈ 1e-2、采集掉线时为 4e-5，两者相差 300 倍，
+#: 阈值取中间量级（≈ -60 dBFS）即可稳定区分，不会误伤正常录音。
+SILENT_AUDIO_RMS_FLOOR = 1e-3
+#: 提示串复读判定的最少段数：识别结果被标点切出这么多段、且每段都是热词时，
+#: 才认定模型在复读 context（避开 "HOME" 这类单词用例的误判）
+PROMPT_ECHO_MIN_SEGMENTS = 3
+#: 识别不可用的原因，随结果回传给调用方写进界面与结果文件：
+#: 这两种情况都没有可信识别文本，结论应记 NO_REF（无法判定）而非 FAIL
+TRANSCRIPT_SILENT_REASON = "录音为静音，未捕获到语音"
+TRANSCRIPT_ECHO_REASON = "识别结果复读了热词提示串"
+
+#: 音量归一化的增益区间。上限放宽到 200 倍以覆盖采集卡等极弱信号（-60dB 级）
+#: 录音，否则归一化后仍停留在 -50dB 附近无法识别。
+NORMALIZATION_GAIN_MIN = 0.1
+NORMALIZATION_GAIN_MAX = 200.0
+#: 人声频段增强：带通范围与叠加增益（300Hz-3kHz 是人声主要能量区）
+VOICE_BAND_LOW_HZ = 300
+VOICE_BAND_HIGH_HZ = 3000
+VOICE_BAND_BOOST = 0.3
+#: 采样率低于此值时跳过人声频段增强（Nyquist 已低于 3kHz，滤波无意义）
+VOICE_BOOST_MIN_SAMPLE_RATE = 6000
+#: 本底噪声低于此值（dBFS）时跳过降噪：16bit 量化极限约 -90.3dBFS，采集卡
+#: 数字直采的底噪就贴在它附近，说明录音里根本没有噪声，只有量化底噪。
+#: 此时非平稳门控会逐帧追着量化噪声开合，实测每遍改动 16% 信号能量且不收敛、
+#: 还吃掉 1dB 电平，27 条真实录音对照显示多降一遍平均分 99.20% → 96.19%。
+#: 阈值取 -80dBFS：远高于量化极限，又远低于任何真实环境噪声（通常 -60dBFS 以上）。
+NOISE_FLOOR_SKIP_DBFS = -80.0
+#: 本底噪声估计：分帧长度（秒）与所取分位数（语音只占一小部分，最安静的那批
+#: 帧反映的就是本底，不受说话人音量影响）。
+NOISE_FLOOR_FRAME_SECONDS = 0.02
+NOISE_FLOOR_PERCENTILE = 10
+
 COHERE_LANGUAGE_ALIASES = {
     "english": "en", "en": "en", "en-us": "en",
     "german": "de", "de": "de",
@@ -74,6 +116,29 @@ HF_MIRROR_ENDPOINTS = [
     "https://huggingface.sukaka.top",
     "https://hf.xxxx.one",
 ]
+
+
+@dataclass(frozen=True)
+class TranscriptionResult:
+    """一次 ASR 识别的结果。
+
+    把「识别不出可信文本」和「识别出一段文本」区分开：前者不能让空的识别
+    文本流进比对（会被算成 0 分 FAIL，把采集/模型故障记成设备不达标），
+    所以连原因一起回传，由调用方记 NO_REF。
+
+    Attributes:
+        text: 识别文本；识别不可用时为空串。
+        unavailable_reason: 识别不可用的原因（静音 / 复读热词提示串）；
+            识别正常时为空串。
+    """
+
+    text: str = ""
+    unavailable_reason: str = ""
+
+    @property
+    def is_available(self) -> bool:
+        """是否拿到了可信的识别文本。"""
+        return not self.unavailable_reason
 
 
 def detect_backend_kind(model_dir: Path) -> str:
@@ -133,7 +198,9 @@ class _AsrBackend:
         self.model_path = Path(model_path)
         self._loaded: Any | None = None
 
-    def transcribe(self, audio_path: str | Path, language: str = "English") -> str:
+    def transcribe(
+        self, audio_path: str | Path, language: str = "English", context: str = ""
+    ) -> str:
         raise NotImplementedError
 
 
@@ -168,10 +235,18 @@ class _QwenAsrBackend(_AsrBackend):
         self._loaded = model
         return model
 
-    def transcribe(self, audio_path: str | Path, language: str = "English") -> str:
+    def transcribe(
+        self, audio_path: str | Path, language: str = "English", context: str = ""
+    ) -> str:
+        """转写音频。
+
+        Args:
+            context: 热词/领域上下文提示串（system 词汇偏置），由服务层按
+                全局热词配置组装；空串与 qwen_asr 默认一致，等价不注入。
+        """
         model = self._load()
         try:
-            results = model.transcribe(audio=str(audio_path), language=language)
+            results = model.transcribe(audio=str(audio_path), language=language, context=context)
         except Exception as exc:
             raise AsrRuntimeError(f"ASR 识别失败: {str(exc)}") from exc
 
@@ -258,7 +333,11 @@ class _CohereTranscribeBackend(_AsrBackend):
         normalized = str(language or "").strip().lower()
         return COHERE_LANGUAGE_ALIASES.get(normalized, normalized or "en")
 
-    def transcribe(self, audio_path: str | Path, language: str = "English") -> str:
+    def transcribe(
+        self, audio_path: str | Path, language: str = "English", context: str = ""
+    ) -> str:
+        # context 仅供 Qwen3-ASR 的 system 消息词汇偏置；Cohere 后端无此机制，
+        # 接受参数但忽略（由实现保证，服务层无需按后端类型分支）。
         processor, model, device, dtype = self._load()
         waveform = self._read_audio_waveform(audio_path)
         normalized_language = self._normalize_language(language)
@@ -425,10 +504,29 @@ class Recorder:
                 _log.warning("[录音] stream.%s 失败: %s", action, exc)
 
     def save_recording(self, output_file: str | Path) -> Path:
+        """把采集缓冲写成 16bit 单声道 WAV。
+
+        设备（如 USB 音频接口）常常只提供多通道输入，``actual_channels`` 因此会
+        大于 1；但各路内容一致，录成立体声没有信息增益——下游 enhance_audio、
+        reduce_noise 与 ASR 输入全部按单声道处理。这里直接降混，后续链路少做一次
+        无意义的重复计算，也不再进入立体声专属的处理分支。
+
+        Args:
+            output_file: 目标 WAV 路径，父目录不存在时自动创建。
+
+        Returns:
+            写入后的文件路径。
+
+        Raises:
+            AsrRuntimeError: 缓冲为空，即未采集到任何音频数据。
+        """
         if not self.recording_data:
             raise AsrRuntimeError("录音结果为空，未采集到音频数据")
 
         recording = np.concatenate(self.recording_data, axis=0)
+        if recording.ndim > 1 and recording.shape[1] > 1:
+            recording = recording.mean(axis=1)
+
         duration = len(recording) / self.sample_rate
         max_amp = float(np.max(np.abs(recording)))
         _log.info(
@@ -440,7 +538,7 @@ class Recorder:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with wave.open(str(output_path), "wb") as wav_file:
-            wav_file.setnchannels(self.actual_channels)
+            wav_file.setnchannels(1)
             wav_file.setsampwidth(2)
             wav_file.setframerate(self.sample_rate)
             wav_file.writeframes((recording * 32767).astype(np.int16).tobytes())
@@ -522,11 +620,18 @@ class TextComparer:
     @staticmethod
     def clean_text(text: str) -> str:
         text = str(text or "").lower()
-        # 应用用户自定义替换规则（在标点移除和数字转换之前）
-        text = TextComparer.apply_substitutions(text)
+        # 应用用户自定义替换规则（在标点移除和数字转换之前）。
+        # 替换值直接插入会破坏开头 lowercase 的大小写约定（如规则值 "HOME"），
+        # 需再次小写，否则与全小写的参考文本比对必得 0 分。
+        text = TextComparer.apply_substitutions(text).lower()
         # 将 "+" 和单词中的 "plus" 统一为分词 "plus"，确保 "Whale+" 和 "WhalePlus" 视为相同
         text = re.sub(r"\+", " plus ", text)
         text = re.sub(r"(\w)(plus)", r"\1 plus ", text)
+        # 连字符 / 斜杠在语音里等同空格，必须先转成空格再走标点清理：否则
+        # "Wi-Fi" 被删成 "wifi"，而参考列的 "Wi Fi" 是 "wi fi"，只差一个空格
+        # 就要扣掉 4.19%（实测 95.81%）。撇号等仍按原样删除，保住
+        # "don't" 与 "dont" 的匹配。
+        text = re.sub(r"[-/–—]", " ", text)
         text = re.sub(r"[^\w\s]", "", text)
         # 将英文数字单词转为阿拉伯数字（volume four → volume 4, fifty three → 53）
         words = text.split()
@@ -593,6 +698,241 @@ class TextComparer:
             "matched": average >= threshold,
             "result": "PASS" if average >= threshold else "FAIL",
         }
+
+
+def _normalize_for_match(text: str) -> str:
+    """归一化文本用于热词比对：小写、非字母数字转空格、折叠空白。"""
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _split_segments(text: str) -> list[str]:
+    """按中英文标点把识别文本切段，供复读判定使用。"""
+    return [part for part in re.split(r"[,.;:!?，。；：！？]", text) if part.strip()]
+
+
+def _prompt_words(prompt: str) -> set[str]:
+    """从提示串还原本次注入的词表（``build_context_prompt`` 的逆操作）。
+
+    Args:
+        prompt: 形如 "Vocabulary: word1, word2" 的提示串。
+
+    Returns:
+        归一化后的词集合；词条内部空格原样保留（"app setting" 视为一个词）。
+    """
+    body = prompt[len(CONTEXT_PROMPT_PREFIX):] if prompt.startswith(CONTEXT_PROMPT_PREFIX) else prompt
+    return {
+        word
+        for word in (_normalize_for_match(part) for part in body.split(","))
+        if word
+    }
+
+
+def _is_prompt_echo(transcript: str, prompt: str) -> bool:
+    """判断识别结果是否只是把注入的热词提示串复读了回来。
+
+    Qwen3-ASR 面对静音/噪声时会顺势续写 context、直接吐回整张词表
+    （实测：4.6s 静音录音 → "Vocabulary: app setting, HOME, ..."）。
+    这种输出没有任何识别价值，当成真实文本参与比对会产出看似合理的分数，
+    必须在服务层丢弃。
+
+    判定要求「词表不少于 N 条」且「识别结果切段后每段都是词表里的词」，
+    两个条件同时成立才丢弃：正常语音里夹带几个热词（如 "the apps menu shows
+    HOME"）因含非热词段而不会误判。
+
+    Args:
+        transcript: 模型识别文本。
+        prompt: 本次实际注入的提示串；为空表示未注入词表，不可能复读。
+
+    Returns:
+        识别结果等价于提示串词表时为 True。
+    """
+    if not transcript or not prompt:
+        return False
+
+    words = _prompt_words(prompt)
+    if len(words) < PROMPT_ECHO_MIN_SEGMENTS:
+        return False
+
+    prefix = _normalize_for_match(CONTEXT_PROMPT_PREFIX)
+    segments = [
+        normalized
+        for normalized in (_normalize_for_match(part) for part in _split_segments(transcript))
+        if normalized and normalized != prefix
+    ]
+    if len(segments) < PROMPT_ECHO_MIN_SEGMENTS:
+        return False
+    return all(segment in words for segment in segments)
+
+
+class AsrContextWords:
+    """Qwen3-ASR 全局热词词表：读纯文本文件，组装 context 提示串。
+
+    热词经 system context 注入做解码偏置，只对 Qwen3-ASR 后端生效（Cohere
+    Transcribe 无此机制，参数接受并忽略）。词表文件每行一个词/短语，# 开头
+    为注释行；文件缺失或词表为空 = 不注入（A/B 基线）。热路径每次识别 stat
+    一次文件 mtime，外部手改保存后下一次识别即生效，无需重启后端；不做文件
+    锁，半写窗口最多读到残缺词表（只影响当次识别），下次自愈。
+    """
+
+    _words_cache: list[str] | None = None
+    _words_mtime: float = 0.0
+
+    @classmethod
+    def _get_words_path(cls) -> Path:
+        return settings.WORKING_DIR / ASR_HOTWORDS_FILENAME
+
+    @classmethod
+    def _clean_lines(cls, lines: list[str]) -> list[str]:
+        """清洗词表行：去空、跳过 # 注释、保序去重、截断超限词条与总数。
+
+        词条只做 strip 不做内部空白折叠——"app setting" 这类英文短语必须
+        原样保留才能作为整体热词。
+        """
+        words: list[str] = []
+        for raw_line in lines:
+            word = raw_line.strip()
+            if not word or word.startswith("#") or word in words:
+                continue
+            words.append(word[:MAX_CONTEXT_WORD_CHARS])
+            if len(words) >= MAX_CONTEXT_WORDS:
+                break
+        return words
+
+    @classmethod
+    def _read_words_file(cls) -> list[str]:
+        """读词表文件；文件缺失或读取失败视为空词表（= 基线），不抛异常。"""
+        try:
+            lines = cls._get_words_path().read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        return cls._clean_lines(lines)
+
+    @classmethod
+    def get_words(cls) -> list[str]:
+        """获取规范化词表（每次调用 stat 一次 mtime，感知外部手改）。
+
+        Returns:
+            词表副本；文件缺失/被删时返回空列表（不注入，等同基线）。
+        """
+        path = cls._get_words_path()
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            cls._words_cache = []
+            cls._words_mtime = 0.0
+            return []
+        if cls._words_cache is not None and cls._words_mtime == mtime:
+            return list(cls._words_cache)
+        words = cls._read_words_file()
+        cls._words_cache = words
+        cls._words_mtime = mtime
+        return list(words)
+
+    @classmethod
+    def build_context_prompt(cls) -> str:
+        """组装 context 热词提示串。
+
+        Returns:
+            形如 "Vocabulary: word1, word2" 的提示串；词表为空时返回空串
+            （等价不注入，保证与旧行为逐字节一致）。
+        """
+        words = cls.get_words()
+        if not words:
+            return ""
+        return f"{CONTEXT_PROMPT_PREFIX}{', '.join(words)}"
+
+
+def _to_mono_float(raw_data: np.ndarray) -> np.ndarray:
+    """整数 WAV 样本归一化到 [-1, 1] 并降混为单声道。
+
+    Args:
+        raw_data: ``scipy.io.wavfile.read`` 返回的原始样本数组。
+
+    Returns:
+        单声道 float64 数组。
+    """
+    data = raw_data.astype(np.float64)
+    if np.issubdtype(raw_data.dtype, np.integer):
+        data = data / np.iinfo(raw_data.dtype).max
+    return data.mean(axis=1) if data.ndim > 1 else data
+
+
+def _read_wav_mono(audio_path: str | Path) -> np.ndarray:
+    """读 WAV 为单声道 float64 数组，幅度归一到 [-1, 1]。
+
+    用 scipy 而非 libsndfile：录音由 stdlib ``wave`` 写出，libsndfile 读它存在
+    C 级崩溃风险（与 ``reduce_noise`` 同因，见那里的注释）。
+
+    Args:
+        audio_path: WAV 文件路径。
+
+    Returns:
+        单声道采样数组。
+    """
+    from scipy.io import wavfile
+
+    return _to_mono_float(wavfile.read(str(audio_path))[1])
+
+
+def _measure_noise_floor_dbfs(data: np.ndarray, sample_rate: int) -> float | None:
+    """估计录音的本底噪声（dBFS）。
+
+    取分帧 RMS 的低分位数：语音只占整段录音的一小部分，最安静的那批帧反映的
+    就是本底，不受说话人音量影响。
+
+    Args:
+        data: 单声道采样数组，幅度已归一到 [-1, 1]。
+        sample_rate: 采样率。
+
+    Returns:
+        本底噪声（dBFS）；录音短到无法分帧时返回 None（无从判断）。
+    """
+    frame_length = max(1, int(sample_rate * NOISE_FLOOR_FRAME_SECONDS))
+    frame_count = len(data) // frame_length
+    if frame_count < 1:
+        return None
+    frames = data[: frame_count * frame_length].reshape(frame_count, frame_length)
+    frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    quietest_frame = float(np.percentile(frame_rms, NOISE_FLOOR_PERCENTILE))
+    return 20 * np.log10(max(quietest_frame, 1e-10))
+
+
+def _should_reduce_noise(noise_floor_dbfs: float | None) -> bool:
+    """判断录音是否真有噪声可降。
+
+    Args:
+        noise_floor_dbfs: ``_measure_noise_floor_dbfs`` 的返回值。
+
+    Returns:
+        是否需要降噪。噪声底无从判断（None）时返回 False：降噪实测会拉低
+        识别率，判断不了就不做。
+    """
+    if noise_floor_dbfs is None:
+        return False
+    return noise_floor_dbfs > NOISE_FLOOR_SKIP_DBFS
+
+
+def _is_silent_audio(audio_path: str | Path) -> bool:
+    """判断录音是否为静音（无语音能量）。
+
+    读文件失败时返回 False（放行识别）：判定失败不应反过来阻断正常流程，
+    对静音录音的兜底还有 ``_is_prompt_echo`` 一道。
+
+    Args:
+        audio_path: WAV 文件路径。
+
+    Returns:
+        RMS 低于 ``SILENT_AUDIO_RMS_FLOOR`` 时为 True。
+    """
+    try:
+        data = _read_wav_mono(audio_path)
+    except (OSError, ValueError) as exc:
+        _log.warning("[ASR] 读取音频算能量失败，跳过静音判定: %s | %s", audio_path, exc)
+        return False
+    if data.size == 0:
+        return True
+    return float(np.sqrt(np.mean(np.square(data)))) < SILENT_AUDIO_RMS_FLOOR
 
 
 class AsrService:
@@ -873,9 +1213,35 @@ class AsrService:
             self._loaded_model_name = model_name
             return backend
 
-    def transcribe_audio(self, audio_path: str | Path, language: str = "English") -> str:
+    def transcribe_audio(
+        self, audio_path: str | Path, language: str = "English", context: str | None = None
+    ) -> TranscriptionResult:
+        """ASR 识别。
+
+        静音录音直接跳过推理——既不浪费一次计算，也避免模型对着静音续写注入的
+        context（实测会吐回整张热词表）；识别结果若被判定为复读提示串同样丢弃。
+
+        Args:
+            context: 显式 context 提示串；传 None 时自动套用全局热词词表
+                （AsrContextWords），词表为空则注入空串（与旧行为一致，
+                即 A/B 基线）；显式传值（含 ""）可覆盖/临时关闭词表注入。
+
+        Returns:
+            识别结果；不可信时 ``is_available`` 为 False 且 ``unavailable_reason``
+            说明原因。
+        """
+        if context is None:
+            context = AsrContextWords.build_context_prompt()
+        if _is_silent_audio(audio_path):
+            _log.warning("[ASR] 录音能量过低，判定为静音并跳过识别: %s", audio_path)
+            return TranscriptionResult(unavailable_reason=TRANSCRIPT_SILENT_REASON)
+
         backend = self._load_runtime_model()
-        return backend.transcribe(audio_path, language=language)
+        transcript = backend.transcribe(audio_path, language=language, context=context)
+        if _is_prompt_echo(transcript, context):
+            _log.warning("[ASR] 识别结果复读了热词提示串，已丢弃: %s", transcript)
+            return TranscriptionResult(unavailable_reason=TRANSCRIPT_ECHO_REASON)
+        return TranscriptionResult(text=transcript)
 
     def save_audio_recording(self, recorder: Recorder, case_title: str) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -883,8 +1249,66 @@ class AsrService:
         return recorder.save_recording(target_path)
 
     @staticmethod
+    def _compute_normalization_gain(reference: np.ndarray, target_db: float) -> float:
+        """按参考信号的 RMS 估算归一化增益。
+
+        返回**标量**：多通道必须共用同一个增益，否则通道间的相对电平被破坏，
+        立体声平衡随之丢失。
+
+        Args:
+            reference: 用于估算现有电平的参考信号（多通道时传通道均值）。
+            target_db: 目标音量（dB）。
+
+        Returns:
+            增益倍数；参考信号近似静音时返回 1.0（不做归一化）。
+        """
+        current_rms = float(np.sqrt(np.mean(reference ** 2)))
+        if current_rms <= 1e-6:  # 避免除以零
+            return 1.0
+
+        target_rms = 10 ** (target_db / 20)
+        gain = min(max(target_rms / current_rms, NORMALIZATION_GAIN_MIN), NORMALIZATION_GAIN_MAX)
+        _log.info(
+            "[增强] 音量归一化: 增益=%.2f (原始 RMS=%.4f, 目标 RMS=%.4f)",
+            gain, current_rms, target_rms,
+        )
+        return gain
+
+    @staticmethod
+    def _add_voice_band(data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """叠加 300Hz-3kHz 带通分量，增强人声清晰度。
+
+        滤波沿时间轴（``axis=0``）作用，多通道共用同一组系数，通道间的幅度与
+        相位关系保持不变。
+
+        Args:
+            data: 已归一到 [-1, 1] 的波形，形状为 (样本数,) 或 (样本数, 通道数)。
+            sample_rate: 采样率。
+
+        Returns:
+            叠加人声频段后的波形；频段越界（采样率过低）时原样返回。
+        """
+        from scipy.signal import butter, filtfilt
+
+        nyquist = sample_rate / 2
+        low_freq = VOICE_BAND_LOW_HZ / nyquist
+        high_freq = min(VOICE_BAND_HIGH_HZ / nyquist, 0.95)  # 不超过奈奎斯特频率
+        if low_freq >= high_freq:
+            return data
+
+        b, a = butter(4, [low_freq, high_freq], btype="band")
+        _log.info(
+            "[增强] 人声频段增强: %dHz-%dHz, 增益=%.1f",
+            VOICE_BAND_LOW_HZ, VOICE_BAND_HIGH_HZ, VOICE_BAND_BOOST,
+        )
+        return data + VOICE_BAND_BOOST * filtfilt(b, a, data, axis=0)
+
+    @staticmethod
     def enhance_audio(audio_path: str | Path, target_db: float = -20.0, voice_boost: bool = True) -> Path:
         """音频增强：音量归一化 + 人声频段增强，原地替换。
+
+        增益与带通滤波都是线性运算，直接作用在整个多通道数组上——每个通道因此
+        拿到完全相同的增益和滤波器，立体声平衡天然保持，无需任何逐通道补偿。
 
         Args:
             audio_path: WAV 文件路径
@@ -892,74 +1316,33 @@ class AsrService:
             voice_boost: 是否增强人声频段（300Hz-3kHz），默认 True
         """
         from scipy.io import wavfile
-        from scipy.signal import butter, filtfilt
 
         audio_path = Path(audio_path)
-
-        # 读取音频
         sr, raw_data = wavfile.read(str(audio_path))
         data = raw_data.astype(np.float64)
-        original_dtype = raw_data.dtype
 
         # 归一化到 [-1, 1]
-        if np.issubdtype(original_dtype, np.integer):
-            max_val = np.iinfo(original_dtype).max
+        max_val = 1.0
+        if np.issubdtype(raw_data.dtype, np.integer):
+            max_val = float(np.iinfo(raw_data.dtype).max)
             data = data / max_val
 
-        # 转为单声道处理
-        is_stereo = data.ndim > 1
-        if is_stereo:
-            data_mono = data.mean(axis=1)
-        else:
-            data_mono = data.copy()
+        reference = data.mean(axis=1) if data.ndim > 1 else data
+        data = data * AsrService._compute_normalization_gain(reference, target_db)
 
-        # 1. 音量归一化
-        current_rms = np.sqrt(np.mean(data_mono ** 2))
-        if current_rms > 1e-6:  # 避免除以零
-            target_rms = 10 ** (target_db / 20)
-            gain = target_rms / current_rms
-            # 限制增益范围，避免过度放大。上限放宽到 200 倍以覆盖采集卡等
-            # 极弱信号（-60dB 级）录音，否则归一化后仍停留在 -50dB 附近无法识别。
-            gain = min(gain, 200.0)  # 最大放大 200 倍
-            gain = max(gain, 0.1)    # 最小缩小到 0.1 倍
-            data_mono = data_mono * gain
-            _log.info("[增强] 音量归一化: 增益=%.2f (原始 RMS=%.4f, 目标 RMS=%.4f)", gain, current_rms, target_rms)
+        if voice_boost and sr > VOICE_BOOST_MIN_SAMPLE_RATE:  # 采样率太低时跳过
+            data = AsrService._add_voice_band(data, sr)
 
-        # 2. 人声频段增强（带通滤波 + 增益叠加）
-        if voice_boost and sr > 6000:  # 采样率太低时跳过
-            # 设计带通滤波器：300Hz - 3kHz（人声主要频段）
-            low_freq = 300 / (sr / 2)
-            high_freq = min(3000 / (sr / 2), 0.95)  # 不超过奈奎斯特频率
-
-            if low_freq < high_freq:
-                b, a = butter(4, [low_freq, high_freq], btype='band')
-                voice_band = filtfilt(b, a, data_mono)
-                # 将人声频段叠加到原信号（增益 0.3）
-                data_mono = data_mono + 0.3 * voice_band
-                _log.info("[增强] 人声频段增强: 300Hz-3kHz, 增益=0.3")
-
-        # 防止削波
-        data_mono = np.clip(data_mono, -1.0, 1.0)
-
-        # 如果是立体声，将增强后的单声道应用到所有通道
-        if is_stereo:
-            # 保持原始的立体声平衡
-            gain_ratio = data_mono / (data.mean(axis=1) + 1e-10)
-            gain_ratio = np.clip(gain_ratio, 0.1, 10.0)
-            data = data * gain_ratio[:, np.newaxis]
-            data = np.clip(data, -1.0, 1.0)
-        else:
-            data = data_mono
+        data = np.clip(data, -1.0, 1.0)  # 防止削波
 
         # 转换回原始数据类型并写入
-        if np.issubdtype(original_dtype, np.integer):
-            data = (data * max_val).astype(original_dtype)
+        if np.issubdtype(raw_data.dtype, np.integer):
+            data = (data * max_val).astype(raw_data.dtype)
         else:
-            data = data.astype(original_dtype)
+            data = data.astype(raw_data.dtype)
 
         wavfile.write(str(audio_path), sr, data)
-        duration = len(data) / sr
-        _log.info("[增强] 完成: %s (采样率=%d, 时长=%.2fs)", audio_path.name, sr, duration)
+        _log.info("[增强] 完成: %s (采样率=%d, 时长=%.2fs)", audio_path.name, sr, len(data) / sr)
         return audio_path
 
     @staticmethod
@@ -1000,7 +1383,19 @@ class AsrService:
 
     @staticmethod
     def reduce_noise(audio_path: str | Path) -> Path:
-        """对 WAV 文件做离线降噪（频谱门控），原地替换。若 noisereduce 未安装则跳过。"""
+        """对 WAV 文件做离线降噪（频谱门控），原地替换。
+
+        先量本底噪声，只有确实存在噪声时才降：采集卡数字直采的录音底噪已贴到
+        16bit 量化极限，此时没有任何噪声可降，非平稳门控只会逐帧追着量化噪声
+        开合，既制造伪影又拉低识别率（见 ``NOISE_FLOOR_SKIP_DBFS``）。
+        noisereduce 未安装时同样跳过。
+
+        Args:
+            audio_path: WAV 文件路径。
+
+        Returns:
+            处理后的文件路径（跳过时原样返回）。
+        """
         try:
             import noisereduce as nr
         except ImportError:
@@ -1011,85 +1406,28 @@ class AsrService:
         from scipy.io import wavfile
 
         audio_path = Path(audio_path)
-
         # 用 scipy 读取 WAV（避免 libsndfile 对 wave 模块写出的文件兼容性问题导致 C 级崩溃）
         sr, raw_data = wavfile.read(str(audio_path))
-        data = raw_data.astype(np.float64)
-        # 归一化整数格式到 [-1, 1] 范围
-        if np.issubdtype(raw_data.dtype, np.integer):
-            data = data / np.iinfo(raw_data.dtype).max
-        # 转为单声道处理
-        if data.ndim > 1:
-            data = data.mean(axis=1)
+        data = _to_mono_float(raw_data)
+
+        noise_floor = _measure_noise_floor_dbfs(data, sr)
+        if noise_floor is None:
+            _log.info("[降噪] 跳过: %s (录音过短，本底噪声无从判断)", audio_path.name)
+            return audio_path
+        if not _should_reduce_noise(noise_floor):
+            _log.info(
+                "[降噪] 跳过: %s (本底噪声 %.1f dBFS 已贴量化极限，无噪声可降)",
+                audio_path.name, noise_floor,
+            )
+            return audio_path
+
         reduced = nr.reduce_noise(y=data, sr=sr, stationary=False)
         sf.write(str(audio_path), reduced, sr)
-        _log.info("[降噪] 完成: %s (采样率=%d, 时长=%.2fs)", audio_path.name, sr, len(reduced) / sr)
+        _log.info(
+            "[降噪] 完成: %s (本底=%.1fdBFS, 采样率=%d, 时长=%.2fs)",
+            audio_path.name, noise_floor, sr, len(reduced) / sr,
+        )
         return audio_path
-
-    @staticmethod
-    def adjust_speed(audio_path: str | Path, speed: float = 0.9) -> Path:
-        """调整音频播放速度，原地替换。使用 librosa 或 scipy 实现。
-
-        Args:
-            audio_path: WAV 文件路径
-            speed: 播放速度倍数，< 1 表示减速，> 1 表示加速。默认 0.9 倍速。
-        """
-        if speed <= 0:
-            raise ValueError(f"速度倍数必须大于 0，当前值: {speed}")
-
-        # 接近 1.0 时跳过处理
-        if abs(speed - 1.0) < 0.01:
-            return Path(audio_path)
-
-        audio_path = Path(audio_path)
-
-        # 尝试用 librosa 实现（质量更好）
-        try:
-            import librosa
-            import soundfile as sf
-
-            data, sr = librosa.load(str(audio_path), sr=None, mono=False)
-            # librosa.effects.time_stretch 需要单声道
-            if data.ndim > 1:
-                # 立体声：分别处理每个通道再合并
-                channels = []
-                for ch in range(data.shape[0]):
-                    stretched = librosa.effects.time_stretch(data[ch], rate=speed)
-                    channels.append(stretched)
-                result = np.stack(channels, axis=0)
-            else:
-                result = librosa.effects.time_stretch(data, rate=speed)
-
-            sf.write(str(audio_path), result.T if result.ndim > 1 else result, sr)
-            duration = len(result) / sr if result.ndim == 1 else result.shape[1] / sr
-            _log.info("[变速] 完成: %s (速度=%.2f, 采样率=%d, 时长=%.2fs)", audio_path.name, speed, sr, duration)
-            return audio_path
-        except ImportError:
-            pass
-
-        # 备选：使用 scipy 的简单重采样实现（改变速度同时改变音调）
-        try:
-            from scipy.io import wavfile
-            from scipy.signal import resample_poly
-            from math import gcd
-
-            sr, raw_data = wavfile.read(str(audio_path))
-            # 计算重采样比例：speed < 1 时减速（样本变多），speed > 1 时加速（样本变少）
-            new_sr = int(sr * speed)
-            g = gcd(new_sr, sr)
-            stretched = resample_poly(raw_data, sr // g, new_sr // g)
-
-            # 保持原始数据类型
-            if np.issubdtype(raw_data.dtype, np.integer):
-                max_val = np.iinfo(raw_data.dtype).max
-                stretched = np.clip(stretched, -max_val, max_val).astype(raw_data.dtype)
-
-            wavfile.write(str(audio_path), sr, stretched)
-            _log.info("[变速] 完成: %s (速度=%.2f, 采样率=%d, 时长=%.2fs)", audio_path.name, speed, sr, len(stretched) / sr)
-            return audio_path
-        except Exception as exc:
-            _log.warning("[变速] 处理失败，跳过: %s", exc)
-            return audio_path
 
     def save_transcript(self, audio_path: str | Path, transcript: str) -> Path:
         audio_stem = Path(audio_path).stem

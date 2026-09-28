@@ -2,6 +2,7 @@
 import logging
 import time
 from datetime import datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -29,7 +30,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/excel/asr", tags=["asr"])
 TTS_MARKER = "TTS"
-TTS_COMPARISON_THRESHOLD = 0.85
+# ASR 文本比对判定阈值（平均相似度 >= 阈值判 PASS），可由前端执行设置覆盖
+ASR_PASS_THRESHOLD_DEFAULT = 0.5
+# 汇总结论回填的列名；取值沿用既有词汇：compare_transcript 产出 PASS/FAIL，
+# NO_REF 表示无法判定（缺参考文本、录音静音、识别复读热词），不计入通过率分母
+# （与前端结果徽标、报告服务一致）
+TEST_RESULT_COLUMN = "testResult"
+VERDICT_PASS = "PASS"
+VERDICT_FAIL = "FAIL"
+VERDICT_NO_REF = "NO_REF"
+# 比对文本来源：用户在 Excel 参考列（TTSTXT / tvm）手填的内容优先级最高，
+# 设备日志抓到的 TTS 输出只在参考列为空时兜底
+COMPARISON_SOURCE_REFERENCE = "reference"
+COMPARISON_SOURCE_TTS = "tts"
+# 来源 → 写入结果与报告的展示名
+COMPARISON_SOURCE_LABELS = {
+    COMPARISON_SOURCE_REFERENCE: "Excel TTS 参考列",
+    COMPARISON_SOURCE_TTS: "设备日志 TTS",
+}
 
 
 def _normalize_command_name(command: str) -> str:
@@ -48,8 +66,10 @@ def _is_tts_marker(command: str) -> bool:
 def _plan_multi_tts_segments(commands: list[str]) -> list[dict]:
     """将命令按 TTS 标记切分为多个段。
 
-    无 TTS 标记时返回单段（所有命令在录音中执行）。
-    有 N 个 TTS 标记时返回 N 段，每段包含 trigger 命令和后续 post 命令。
+    录音窗口只覆盖每段的 trigger（TTS 标记后的第一条指令），
+    trigger 执行完 + TTS 捕获等待即停录；pre / post 命令只发送指令、不录音。
+    无 TTS 标记时返回单段，trigger 为整行最后一条命令。
+    有 N 个 TTS 标记时返回 N 段。
 
     每段: {pre: [...], trigger: str, post: [...], uses_tts: bool}
     """
@@ -80,6 +100,48 @@ def _plan_multi_tts_segments(commands: list[str]) -> list[dict]:
         segments.append({"pre": pre, "trigger": trigger, "post": post, "uses_tts": True})
 
     return segments
+
+
+async def _stream_post_commands(segment: dict, request: Request):
+    """执行段的后置命令并转发执行事件（不进录音，仅在比对完成后调用）。
+
+    Args:
+        segment: 段规划字典（含 post 命令列表）。
+        request: 请求对象，供取消检测使用。
+
+    Yields:
+        后置命令的执行事件（原始结构，由调用方 format_sse 包装）。
+    """
+    post_commands = segment.get("post", [])
+    if not post_commands:
+        return
+    async for event in stream_row_command_events([{"row": 1, "commands": post_commands}], 1, request):
+        yield event
+
+
+async def _stream_post_commands_resilient(segment: dict, request: Request, seg_index: int, total_segments: int):
+    """异常路径下补发后置命令，避免设备停在半途影响下一段。
+
+    与 `_stream_post_commands` 的区别：本函数供 except 分支使用，后置命令自身的失败
+    只记录日志，不向上抛出，以免掩盖触发本路径的原始异常。用户主动停止
+    （ExecutionStopped）除外，必须向上抛出交由最外层终止整个执行。
+
+    Args:
+        segment: 段规划字典（含 post 命令列表）。
+        request: 请求对象，供取消检测使用。
+        seg_index: 当前段下标（从 0 开始），仅用于日志。
+        total_segments: 段总数，仅用于日志。
+
+    Yields:
+        后置命令的执行事件（原始结构，由调用方 format_sse 包装）。
+    """
+    try:
+        async for event in _stream_post_commands(segment, request):
+            yield event
+    except ExecutionStopped:
+        raise
+    except Exception as exc:
+        logger.error("[ASR] 后置命令执行失败 (段 %d/%d): %s", seg_index + 1, total_segments, exc)
 
 
 class AsrModelSelectRequest(BaseModel):
@@ -234,7 +296,105 @@ async def set_substitutions(request: SubstitutionsRequest):
         raise HTTPException(status_code=500, detail=f"保存替换规则失败: {str(e)}")
 
 
-async def execute_asr_commands_stream(request: Request, file_name: str, row_index: int, valid_rows: list):
+def _aggregate_verdict(segment_verdicts: List[str]) -> str:
+    """汇总各校验段的结论：任一段 FAIL 即整条用例 FAIL。
+
+    只统计结论明确的段（PASS / FAIL）：NO_REF 段（缺参考文本、录音静音、识别
+    复读热词）是采集或素材问题而非设备不达标，不参与判定；全部可判定段都是
+    PASS 才判 PASS，一个可判定的段都没有时沿用 NO_REF（无法判定）。
+
+    规则与前端行级结果徽标（ExcelAsrAutomation.vue 的 getRowOverallResult）一致。
+
+    Args:
+        segment_verdicts: 各段结论，取值 PASS / FAIL / NO_REF。
+
+    Returns:
+        该用例的汇总结论：PASS / FAIL / NO_REF。
+    """
+    judged = [verdict for verdict in segment_verdicts if verdict in (VERDICT_PASS, VERDICT_FAIL)]
+    if not judged:
+        return VERDICT_NO_REF
+    return VERDICT_PASS if all(verdict == VERDICT_PASS for verdict in judged) else VERDICT_FAIL
+
+
+def _resolve_data_row_index(executed_row: dict) -> Optional[int]:
+    """把用例行的 Excel 行号换算成 write_cell 需要的数据行下标。
+
+    Args:
+        executed_row: read_excel_commands 产出的用例行，带 "row"（Excel 行号，1 起）。
+
+    Returns:
+        数据行下标；行号缺失或换算为负数时返回 None（调用方跳过写回）。
+    """
+    excel_row = executed_row.get("row")
+    if not excel_row:
+        logger.warning("[ASR] 写回 testResult 跳过: 用例行缺少行号")
+        return None
+
+    # Excel 行号含第 1 行表头，且 write_cell 内部按 0 起算再 +2，与执行模块保持一致
+    data_row_index = int(excel_row) - 2
+    if data_row_index < 0:
+        logger.warning("[ASR] 写回 testResult 跳过: data_row_index=%d < 0", data_row_index)
+        return None
+    return data_row_index
+
+
+def _write_asr_test_result(
+    file_name: str, executed_row: dict, segment_verdicts: List[str]
+) -> Optional[str]:
+    """把 ASR 汇总结论回填到测试表格的 testResult 列。
+
+    写回是执行收尾的副作用：失败只记录日志并返回 None，不抛异常——
+    校验本身已经跑完，不应因为落表格失败让整次执行在界面上报错。
+
+    Args:
+        file_name: 测试 Excel 文件名。
+        executed_row: read_excel_commands 产出的用例行，需带 "row"（Excel 行号）。
+        segment_verdicts: 各段结论；为空表示本次没有跑完任何校验段，不写回。
+
+    Returns:
+        已写入的结论值；未写回（无结论/行号不可用/写入异常）时返回 None。
+    """
+    if not segment_verdicts:
+        logger.warning(
+            "[ASR] 写回 testResult 跳过: 用例 '%s' 无已完成的校验段",
+            executed_row.get("title", ""),
+        )
+        return None
+
+    data_row_index = _resolve_data_row_index(executed_row)
+    if data_row_index is None:
+        return None
+
+    overall = _aggregate_verdict(segment_verdicts)
+    try:
+        excel_service.write_cell(file_name, TEST_RESULT_COLUMN, data_row_index, overall)
+    except Exception as e:
+        logger.error(
+            "[ASR] 写回 testResult 失败: file=%s row=%s err=%s",
+            file_name,
+            executed_row.get("row"),
+            e,
+            exc_info=True,
+        )
+        return None
+
+    logger.info(
+        "[ASR] 已写回 testResult=%s: file=%s row=%s",
+        overall,
+        file_name,
+        executed_row.get("row"),
+    )
+    return overall
+
+
+async def execute_asr_commands_stream(
+    request: Request,
+    file_name: str,
+    row_index: int,
+    valid_rows: list,
+    match_threshold: float = ASR_PASS_THRESHOLD_DEFAULT,
+):
     execution_started_at = int(time.time() * 1000)
     active_model = asr_service.get_active_model()
     if active_model is None:
@@ -272,7 +432,8 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
         yield format_sse({"status": "error", "message": str(exc)})
         return
 
-    # 比对文本优先取 Excel M 列 TTSTXT，其次设备日志 TTS 输出
+    # 比对文本：用户在 Excel 参考列（TTSTXT / tvm）填写的内容优先级最高，
+    # 未填写时才回落到设备日志抓到的 TTS 输出
     reference_text = executed_row.get("tts_text", "") or ""
     total_segments = len(segments)
 
@@ -290,19 +451,20 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
         if reference_text:
             yield format_sse({
                 "status": "info",
-                "message": f"已加载参考文本(Excel TTSTXT): {reference_text}"
+                "message": f"已加载参考文本(Excel TTS 参考列)，本次比对该列为准: {reference_text}"
             })
         else:
             yield format_sse({
                 "status": "info",
-                "message": "Excel 未填写 TTSTXT 参考文本，如捕获到 TTS 输出则将使用 TTS 文本进行比对",
+                "message": "Excel 未填写 TTS 参考文本，改用设备日志捕获的 TTS 输出比对",
             })
             logger.info(
-                "ASR 参考文本为空(Excel TTSTXT 未填写): 用例 '%s'，改用 TTS 文本兜底",
+                "ASR 参考文本为空(Excel TTS 参考列未填写): 用例 '%s'，改用 TTS 文本兜底",
                 case_title,
             )
 
         # 逐段执行录音→TTS捕获→ASR→比对
+        segment_verdicts: List[str] = []
         for seg_index, segment in enumerate(segments):
             recorder = None
             recording_started = False
@@ -349,8 +511,9 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     "segment_index": seg_index,
                 })
 
-                # 执行 trigger + post 命令
-                record_commands = [segment["trigger"]] + segment.get("post", [])
+                # 录音窗口只覆盖 TTS 标记后的第一条指令（trigger）：
+                # 执行完即进入 TTS 捕获等待，post 命令不在此窗口内
+                record_commands = [segment["trigger"]]
                 async for event in stream_row_command_events([{"row": 1, "commands": record_commands}], 1, request):
                     yield format_sse(event)
 
@@ -393,10 +556,17 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     "segment_index": seg_index,
                 })
 
-                # 确定比对文本：Excel TTSTXT 优先，其次 TTS 日志文本
-                reference_path = "Excel TTSTXT" if reference_text else ""
-                comparison_text = reference_text or tts_text
-                comparison_source = "reference" if reference_text else "tts"
+                # 比对文本：Excel 参考列只要有手填内容就以它为准，设备日志抓到的
+                # TTS 输出仅在参考列为空时兜底
+                if reference_text:
+                    comparison_text = reference_text
+                    comparison_source = COMPARISON_SOURCE_REFERENCE
+                else:
+                    comparison_text = tts_text
+                    comparison_source = COMPARISON_SOURCE_TTS
+
+                # 比对文本来源标签（写入结果与报告）
+                reference_path = COMPARISON_SOURCE_LABELS[comparison_source]
 
                 if not comparison_text:
                     reference_root = asr_service.reference_root
@@ -417,18 +587,28 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                         "row_index": row_index,
                         "segment_index": seg_index,
                         "total_segments": total_segments,
-                        "asr_result": "NO_REF",
+                        "asr_result": VERDICT_NO_REF,
                         "asr_score": None,
                         "transcribed_text": "",
                         "tts_text": tts_text,
                         "audio_path": str(audio_path),
                     })
+                    segment_verdicts.append(VERDICT_NO_REF)
+
+                    # 无法比对（无参考文本且无 TTS 输出）时仍执行后置命令，避免设备停在半途
+                    async for event in _stream_post_commands(segment, request):
+                        yield format_sse(event)
                     continue
 
-                if not reference_text:
+                if comparison_source == COMPARISON_SOURCE_REFERENCE:
+                    # 命中这里不代表兜底：参考列优先，抓没抓到 TTS 日志都走这条
                     yield format_sse({
                         "status": "info",
-                        "message": "未找到参考文本，改用 TTS 输出文本进行比对",
+                        "message": (
+                            "已捕获 TTS 输出，按优先级改用 Excel TTS 参考列比对"
+                            if tts_text
+                            else "未捕获到 TTS 输出文本，使用 Excel TTS 参考列进行比对"
+                        ),
                         "reference_text": comparison_text,
                         "tts_text": tts_text,
                         "comparison_source": comparison_source,
@@ -455,11 +635,6 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     logger.info("[ASR] reduce_noise 完成")
                 except Exception as e:
                     logger.error("[ASR] reduce_noise 失败: %s", e, exc_info=True)
-                try:
-                    asr_service.adjust_speed(audio_path, speed=0.9)
-                    logger.info("[ASR] adjust_speed 完成")
-                except Exception as e:
-                    logger.error("[ASR] adjust_speed 失败: %s", e, exc_info=True)
                 logger.info("[ASR] 音频处理全部完成")
                 yield format_sse({
                     "status": "info",
@@ -471,7 +646,11 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                 ASR_RETRY_COUNT = 3
                 best_result = None
                 best_score = -1.0
-                comparison_threshold = TTS_COMPARISON_THRESHOLD if comparison_source == "tts" else 0.9
+                # 识别不可用（静音/复读热词）时记下原因：重试同一份音频毫无意义，
+                # 直接跳出重试并由下方统一判 NO_REF，不计入通过率分母
+                unavailable_reason = ""
+                # 统一判定阈值，不区分比对文本来源（设备日志 / Excel 参考列）
+                comparison_threshold = match_threshold
 
                 for attempt in range(1, ASR_RETRY_COUNT + 1):
                     await ensure_execution_active(request)
@@ -482,7 +661,15 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     })
 
                     # ASR 识别
-                    transcript = asr_service.transcribe_audio(audio_path)
+                    outcome = asr_service.transcribe_audio(audio_path)
+                    if not outcome.is_available:
+                        unavailable_reason = outcome.unavailable_reason
+                        logger.warning(
+                            "[ASR] 段 %d 识别不可用(%s)，跳过重试: 用例 '%s'",
+                            seg_index + 1, unavailable_reason, case_title,
+                        )
+                        break
+                    transcript = outcome.text
                     # 应用文本替换规则
                     transcript_display = TextComparer.apply_substitutions(transcript) if transcript else transcript
                     transcript_path = asr_service.save_transcript(audio_path, transcript)
@@ -554,15 +741,30 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
 
                 # 输出最终最优结果
                 if best_result is None:
+                    # 识别不可用 → NO_REF：采集/模型故障不该记成设备不达标
+                    verdict = VERDICT_NO_REF if unavailable_reason else VERDICT_FAIL
                     yield format_sse({
                         "status": "error",
-                        "message": f"段 {seg_index + 1}: {ASR_RETRY_COUNT} 次校验均未产生有效结果",
+                        "message": (
+                            f"段 {seg_index + 1}: {unavailable_reason}，无法判定"
+                            if unavailable_reason
+                            else f"段 {seg_index + 1}: {ASR_RETRY_COUNT} 次校验均未产生有效结果"
+                        ),
                         "row_index": row_index,
                         "segment_index": seg_index,
                         "total_segments": total_segments,
-                        "asr_result": "FAIL",
+                        "asr_result": verdict,
                         "asr_score": None,
+                        "transcribed_text": unavailable_reason,
+                        "tts_text": tts_text,
+                        "reference_text": comparison_text,
                     })
+                    segment_verdicts.append(verdict)
+
+                    # 无法判定时仍执行后置命令，避免设备停在半途（与前方无参考文本的路径一致）
+                    if unavailable_reason:
+                        async for event in _stream_post_commands(segment, request):
+                            yield format_sse(event)
                     continue
 
                 best_comparison = best_result["comparison"]
@@ -597,6 +799,12 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     "transcript_path": str(best_result["transcript_path"]),
                     "compare_result_path": str(best_result["compare_report_path"]),
                 })
+                segment_verdicts.append(best_comparison["result"])
+
+                # post 命令在比对完成后执行（不进录音）：先出验证结论，再发后续导航指令，
+                # 避免按键声进入录音、HOME 等导航键打断播报
+                async for event in _stream_post_commands(segment, request):
+                    yield format_sse(event)
 
             except ExecutionStopped:
                 logger.warning("[ASR] 执行被用户停止 (段 %d/%d)", seg_index + 1, total_segments)
@@ -613,6 +821,10 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     "segment_index": seg_index,
                     "total_segments": total_segments,
                 })
+                segment_verdicts.append(VERDICT_FAIL)
+                # 段失败也要补发后置命令，避免设备停在半途影响下一段
+                async for event in _stream_post_commands_resilient(segment, request, seg_index, total_segments):
+                    yield format_sse(event)
                 continue
             except Exception as exc:
                 logger.error("[ASR] 未知异常 (段 %d/%d): %s", seg_index + 1, total_segments, exc, exc_info=True)
@@ -624,7 +836,15 @@ async def execute_asr_commands_stream(request: Request, file_name: str, row_inde
                     "segment_index": seg_index,
                     "total_segments": total_segments,
                 })
+                segment_verdicts.append(VERDICT_FAIL)
+                # 段失败也要补发后置命令，避免设备停在半途影响下一段
+                async for event in _stream_post_commands_resilient(segment, request, seg_index, total_segments):
+                    yield format_sse(event)
                 continue
+
+        # 全部段跑完后回填汇总结论；用户中途停止（ExecutionStopped）不写回，
+        # 避免把一次没跑完的用例记成结论
+        _write_asr_test_result(file_name, executed_row, segment_verdicts)
 
     except ExecutionStopped:
         logger.warning("[ASR] 执行被用户停止")
@@ -656,6 +876,18 @@ async def execute_asr_case(request: Request):
     except ValueError:
         raise HTTPException(status_code=400, detail="行号必须是整数")
 
+    # 判定阈值：前端执行设置可覆盖；缺省用后端默认值（0.5），范围 0~1
+    raw_threshold = body.get("match_threshold")
+    if raw_threshold is None:
+        match_threshold = ASR_PASS_THRESHOLD_DEFAULT
+    else:
+        try:
+            match_threshold = float(raw_threshold)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="匹配阈值必须是数字")
+        if not 0.0 <= match_threshold <= 1.0:
+            raise HTTPException(status_code=400, detail="匹配阈值必须在 0~1 之间")
+
     try:
         result = excel_service.read_commands(file_name, row_index)
     except FileNotFoundError as e:
@@ -668,7 +900,7 @@ async def execute_asr_case(request: Request):
         raise HTTPException(status_code=400, detail="行号超出有效用例范围")
 
     return StreamingResponse(
-        execute_asr_commands_stream(request, file_name, row_index, valid_rows),
+        execute_asr_commands_stream(request, file_name, row_index, valid_rows, match_threshold),
         media_type="text/event-stream"
     )
 

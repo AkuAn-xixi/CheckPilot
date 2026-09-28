@@ -10,9 +10,14 @@ import logging
 import threading
 from datetime import datetime
 import pandas as pd
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Sequence, Tuple
 from ..config import settings
 from ...FieldValidation import get_valid_keys as get_runtime_valid_keys
+from .command_aliases import (
+    expand_command_aliases_grouped,
+    load_command_aliases,
+    split_command_segments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +124,12 @@ NON_EXECUTABLE_KEYS = frozenset({"ASSERT", "TTS", "NOTASSERT"})
 SENDEVENT_LONG_PRESS_MARGIN_US = 150000  # 150ms
 # 无法从设备查询到长按阈值时使用的兜底默认值（微秒）。
 SENDEVENT_LONG_PRESS_DEFAULT_TIMEOUT_US = 500000  # 500ms
+
+# 设备扫描结果的复用窗口（秒）。首页/设备页会在同一瞬间各拉一次设备列表，
+# 每次都要跑一遍 ``adb devices``；ADB server 异常时单次最坏 2×5s 超时 + 0.5s
+# 重试间隔，并发几路就是几倍的等待。窗口取 1~2s：足够把这种同屏并发和用户的
+# 连点合并成一次真实扫描，又短到拔插设备后刷新仍能立刻看到变化。
+DEVICE_SCAN_CACHE_TTL_SECONDS = 1.5
 
 
 def get_keycode_map() -> dict:
@@ -315,6 +326,31 @@ def _parse_repeat_count(repeat_token: str, wait_time_token: str) -> int:
     )
 
 
+def _flatten_grouped_commands(
+    grouped: Sequence[Tuple[str, List[str]]],
+) -> Tuple[List[str], List[str], List[int]]:
+    """把「逐段展开」的结果拍平成执行命令、显示段与两者的下标映射。
+
+    前端要按用户实际写的原文显示 chip（逻辑名就显示逻辑名），执行时的高亮却
+    只能按发出去的按键名匹配，所以两条列表都要给出去，再用 ``offsets`` 挂钩。
+
+    Args:
+        grouped: :func:`expand_command_aliases_grouped` 的返回值。
+
+    Returns:
+        ``(命令列表, 显示段, 结束下标)``；``显示段[i]`` 展开出的命令即
+        ``命令列表[结束下标[i-1]:结束下标[i]]``（``i`` 为 0 时从 0 开始）。
+    """
+    commands: List[str] = []
+    display: List[str] = []
+    offsets: List[int] = []
+    for segment, expanded in grouped:
+        commands.extend(expanded)
+        display.append(segment)
+        offsets.append(len(commands))
+    return commands, display, offsets
+
+
 def is_valid_repeat_spec(repeat_token: str) -> bool:
     """校验次数段是否合法：正整数、``X``、``X:N`` 或 ``X:(A:B)``（A 下限 ≤ B 上限）。
 
@@ -421,6 +457,10 @@ class ADBController:
         self._excel_cache_result: Optional[Dict[str, Any]] = None
         # 设备长按判定阈值（微秒）缓存，None 表示未查询
         self._long_press_timeout_us: Optional[int] = None
+        # 设备扫描结果缓存与单飞锁：见 DEVICE_SCAN_CACHE_TTL_SECONDS 与 list_devices
+        self._scan_lock = threading.Lock()
+        self._scan_cached_at: float = 0.0
+        self._scan_cached_devices: Optional[List[str]] = None
 
     def _set_executing(self, value: bool) -> None:
         with self._state_lock:
@@ -472,7 +512,36 @@ class ADBController:
         空结果或失败会快速重试一次：ADB server 启动中 / USB 重新枚举等瞬时抖动
         经常让 ``adb devices`` 暂时返回空，若因此清掉用户已选设备会造成"刚选好
         设备又提示没选设备"的诡异现象。
+
+        整个扫描在 ``_scan_lock`` 内完成，同一时刻只会有一个真实扫描：并发的
+        调用方等这一次扫描结束、再命中它写下的缓存，而不是各自跑一遍
+        ``adb devices``。复用窗口见 ``DEVICE_SCAN_CACHE_TTL_SECONDS``。
         """
+        with self._scan_lock:
+            cached_devices = self._get_cached_devices()
+            if cached_devices is not None:
+                return cached_devices
+
+            devices = self._scan_devices_with_retry(timeout)
+            self._scan_cached_devices = devices
+            self._scan_cached_at = time.monotonic()
+            return list(devices)
+
+    def _get_cached_devices(self) -> Optional[List[str]]:
+        """取仍在 TTL 内的扫描结果；从未扫描过或已过期时返回 None。
+
+        返回副本，避免调用方就地修改列表时污染缓存。
+        """
+        if self._scan_cached_devices is None:
+            return None
+
+        if time.monotonic() - self._scan_cached_at >= DEVICE_SCAN_CACHE_TTL_SECONDS:
+            return None
+
+        return list(self._scan_cached_devices)
+
+    def _scan_devices_with_retry(self, timeout: float) -> List[str]:
+        """扫描设备列表，结果为空时重试一次。"""
         for attempt in (1, 2):
             devices = self._scan_devices_once(timeout)
             if devices or attempt == 2:
@@ -1145,6 +1214,72 @@ class ADBController:
         command.extend(args)
         return command
 
+    def run_shell_command(self, *args: str, timeout: Optional[float] = None) -> str:
+        """执行一条 adb shell 命令并取回标准输出。
+
+        参数按列表传递（不经 shell 拼接），避免命令注入；失败与超时都抛异常，
+        让调用方决定怎么兜底，而不是靠返回值猜。
+
+        Args:
+            *args: 传给 ``adb shell`` 的参数，例如 ``run_shell_command("dumpsys", "input")``。
+            timeout: 超时秒数，默认取 ``settings.ADB_TIMEOUT``。
+
+        Returns:
+            命令的标准输出。
+
+        Raises:
+            RuntimeError: adb 不存在、命令超时或返回非 0 退出码。
+        """
+        effective_timeout = settings.ADB_TIMEOUT if timeout is None else timeout
+        try:
+            result = subprocess.run(
+                self._adb_command("shell", *args),
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=effective_timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"adb shell 超时（{effective_timeout}s）: {' '.join(args)}") from e
+        except OSError as e:
+            raise RuntimeError(f"adb shell 执行失败: {e}") from e
+
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip() or " ".join(args)
+            raise RuntimeError(f"adb shell 退出码 {result.returncode}: {detail}")
+        return result.stdout or ""
+
+    def spawn_shell_stream(self, *args: str) -> subprocess.Popen:
+        """启动一条持续输出的 adb shell 命令，例如 ``getevent -lt``。
+
+        与 :meth:`run_shell_command` 的区别是不等待命令结束——这类命令不会自己退出。
+        调用方负责在收工时终止返回的进程。
+
+        Args:
+            *args: 传给 ``adb shell`` 的参数。
+
+        Returns:
+            已启动的进程；``stdout`` 为按行读取的文本流，``stderr`` 已丢弃
+            （避免无人读取时写满管道把子进程卡住）。
+
+        Raises:
+            RuntimeError: 子进程无法启动。
+        """
+        try:
+            return subprocess.Popen(
+                self._adb_command("shell", *args),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                bufsize=1,
+            )
+        except OSError as e:
+            raise RuntimeError(f"adb shell 子进程启动失败: {e}") from e
+
     def clear_logcat(self) -> None:
         """清空设备 logcat 缓冲区。"""
         try:
@@ -1571,6 +1706,12 @@ class ADBController:
             if 'preScript' in df.columns:
                 console_log("检测到SmartTV模板格式，正在解析preScript列...")
 
+                # 指令别名字典随工作簿一起走：解析缓存按 (路径, mtime) 失效，
+                # 改过任一工作表都会命中新字典，这里无需再单独缓存。
+                command_aliases = load_command_aliases(excel_path)
+                if command_aliases:
+                    console_log(f"[read_excel_commands] 已加载 {len(command_aliases)} 条指令别名")
+
                 all_valid_rows = []
                 for index, row in df.iterrows():
                     if 'runOption' in df.columns and str(row['runOption']).upper() != 'Y':
@@ -1584,23 +1725,19 @@ class ADBController:
                         skipped_rows.append({"row": index+2, "reason": "oriStep和preScript列都为空，用例未识别"})
                         continue
 
-                    combined_commands = []
-
-                    if ori_step:
-                        ori_commands = ori_step.split(',')
-                        for cmd in ori_commands:
-                            cmd = cmd.strip()
-                            if not cmd:
-                                continue
-                            combined_commands.append(cmd)
-
-                    if pre_script:
-                        pre_commands = pre_script.split(',')
-                        for cmd in pre_commands:
-                            cmd = cmd.strip()
-                            if not cmd:
-                                continue
-                            combined_commands.append(cmd)
+                    # 必须在校验循环之前展开别名：只写逻辑名的行也要能被判为有效，
+                    # 否则整行会被丢进 skipped_rows，前端两个页面都看不到该用例。
+                    grouped_commands = (
+                        expand_command_aliases_grouped(
+                            split_command_segments(ori_step), command_aliases
+                        )
+                        + expand_command_aliases_grouped(
+                            split_command_segments(pre_script), command_aliases
+                        )
+                    )
+                    combined_commands, display_commands, command_offsets = (
+                        _flatten_grouped_commands(grouped_commands)
+                    )
 
                     has_valid_command = False
                     missing_mapping_keys = set()
@@ -1658,9 +1795,14 @@ class ADBController:
                         if 'testResult' in row:
                             test_result = self._normalize_excel_text(row['testResult'])
 
-                        # M 列 TTSTXT：用户提供的 TTS 期望文本，供 ASR 比对优先使用
-                        if 'TTSTXT' in row:
-                            tts_text = self._normalize_excel_text(row['TTSTXT'])
+                        # TTS 参考文本列：设备日志未捕获到 TTS 输出时的比对兜底文本。
+                        # 兼容两种表头：旧模板 M 列 TTSTXT；现行模板 N 列 tvm。
+                        for tts_header in ("TTSTXT", "tvm"):
+                            if tts_header in row:
+                                candidate = self._normalize_excel_text(row[tts_header])
+                                if candidate:
+                                    tts_text = candidate
+                                    break
 
                         all_valid_rows.append({
                             "row": index+2,
@@ -1671,7 +1813,11 @@ class ADBController:
                             "tts_text": tts_text,
                             "oriStep": ori_step,
                             "preScript": pre_script,
-                            "commands": combined_commands
+                            "commands": combined_commands,
+                            # 前端照 display_commands 显示（逻辑名就显示逻辑名），
+                            # 执行时再借 command_offsets 把高亮映射到这一条上
+                            "display_commands": display_commands,
+                            "command_offsets": command_offsets
                         })
                     else:
                         if missing_mapping_keys:

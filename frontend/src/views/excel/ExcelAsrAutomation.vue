@@ -216,7 +216,7 @@
               <input
                 v-model.number="matchThreshold"
                 type="range"
-                min="0.5"
+                min="0"
                 max="1"
                 step="0.01"
                 class="flex-1"
@@ -478,7 +478,7 @@
                           :key="cmd.id"
                           class="excel-step-command"
                           :class="{ 'excel-step-command-active': isCommandActive(item.idx, cmd) }"
-                          :title="cmd.raw"
+                          :title="cmd.expandedText || cmd.raw"
                         >
                           <span class="excel-step-command-key">{{ cmd.key }}</span>
                           <span v-if="cmd.meta" class="excel-step-command-meta">{{ cmd.meta }}</span>
@@ -489,13 +489,13 @@
                       <div
                         v-else-if="getRowCommandTokens(item.row).length"
                         class="excel-step-sequence-collapsed"
-                        :title="getRowCommandTokens(item.row).map(c => c.raw).join(', ')"
+                        :title="getRowCommandTokens(item.row).map(c => c.expandedText || c.raw).join(', ')"
                       >
                         <span
                           v-for="cmd in getRowCommandTokens(item.row)"
                           :key="cmd.id"
                           class="excel-step-command"
-                          :title="cmd.raw"
+                          :title="cmd.expandedText || cmd.raw"
                         >
                           <span class="excel-step-command-key">{{ cmd.key }}</span>
                           <span v-if="cmd.meta" class="excel-step-command-meta">{{ cmd.meta }}</span>
@@ -537,58 +537,27 @@
                       </div>
                     </td>
                     <td class="border px-3 py-3 text-center align-top">
+                      <!-- 结果列只保留行级总览，段级明细统一在「查看结果」弹窗中逐段查看 -->
                       <div v-if="rowRunMeta[item.idx] && (rowRunMeta[item.idx].asr_result || rowRunMeta[item.idx].tts_text || rowRunMeta[item.idx].transcribed_text || rowRunMeta[item.idx].reference_text || Number.isFinite(rowRunMeta[item.idx].asr_score))" class="space-y-2 text-left">
-                        <!-- 多段结果 -->
-                        <template v-if="rowRunMeta[item.idx].segments && rowRunMeta[item.idx].segments.length > 1">
-                          <div v-for="(seg, si) in rowRunMeta[item.idx].segments" :key="si" class="border-l-2 pl-2 mb-2" :class="si > 0 ? 'border-slate-200' : 'border-transparent'">
-                            <div class="flex flex-wrap items-center gap-2">
-                              <span class="text-xs font-medium text-slate-400">段{{ si + 1 }}</span>
-                              <span
-                                v-if="seg.asr_result"
-                                class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
-                                :class="getAsrResultBadgeClass(seg.asr_result)"
-                              >
-                                {{ seg.asr_result }}
-                              </span>
-                              <span v-if="Number.isFinite(seg.asr_score)" class="text-sm font-semibold text-slate-700">
-                                {{ formatAsrScore(seg.asr_score) }}
-                              </span>
-                            </div>
-                            <p v-if="seg.reference_text" class="line-clamp-2 text-xs leading-5 text-slate-500" :title="seg.reference_text">
-                              TTS：{{ seg.reference_text }}
-                            </p>
-                            <p v-if="seg.transcribed_text" class="line-clamp-2 text-xs leading-5 text-slate-500" :title="seg.transcribed_text">
-                              ASR：{{ seg.transcribed_text }}
-                            </p>
-                            <p v-else-if="seg.asr_result === 'NO_REF'" class="text-xs leading-5 text-amber-600">
-                              {{ $t('excelAsr.noReference') }}
-                            </p>
-                          </div>
-                        </template>
-                        <!-- 单段结果（兼容原有展示） -->
-                        <template v-else>
-                          <div class="flex flex-wrap items-center gap-2">
-                            <span
-                              v-if="rowRunMeta[item.idx].asr_result"
-                              class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
-                              :class="getAsrResultBadgeClass(rowRunMeta[item.idx].asr_result)"
-                            >
-                              {{ rowRunMeta[item.idx].asr_result }}
-                            </span>
-                            <span v-if="Number.isFinite(rowRunMeta[item.idx].asr_score)" class="text-sm font-semibold text-slate-700">
-                              {{ formatAsrScore(rowRunMeta[item.idx].asr_score) }}
-                            </span>
-                          </div>
-                          <p v-if="rowRunMeta[item.idx].reference_text" class="line-clamp-3 text-xs leading-5 text-slate-500" :title="rowRunMeta[item.idx].reference_text">
-                            TTS：{{ rowRunMeta[item.idx].reference_text }}
-                          </p>
-                          <p v-if="rowRunMeta[item.idx].transcribed_text" class="line-clamp-3 text-xs leading-5 text-slate-500" :title="rowRunMeta[item.idx].transcribed_text">
-                            ASR：{{ rowRunMeta[item.idx].transcribed_text }}
-                          </p>
-                          <p v-else-if="rowRunMeta[item.idx].asr_result === 'NO_REF'" class="text-xs leading-5 text-amber-600">
-                            {{ $t('excelAsr.noReference') }}
-                          </p>
-                        </template>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span
+                            v-if="getRowOverallResult(rowRunMeta[item.idx])"
+                            class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
+                            :class="getAsrResultBadgeClass(getRowOverallResult(rowRunMeta[item.idx]))"
+                          >
+                            {{ getRowOverallResult(rowRunMeta[item.idx]) }}
+                          </span>
+                          <span v-if="Number.isFinite(getRowOverallScore(rowRunMeta[item.idx]))" class="text-sm font-semibold text-slate-700">
+                            {{ formatAsrScore(getRowOverallScore(rowRunMeta[item.idx])) }}
+                          </span>
+                        </div>
+                        <button
+                          class="btn btn-secondary btn-sm whitespace-nowrap"
+                          @click="openAsrResultModal(item.idx)"
+                          :disabled="Boolean(executingRows[item.idx])"
+                        >
+                          {{ $t('excelAsr.viewResult') }}
+                        </button>
                       </div>
                       <span v-else>-</span>
                     </td>
@@ -776,6 +745,117 @@
         </div>
       </div>
 
+      <!-- ASR 结果详情弹窗：结果列仅展示简短状态，完整明细统一在此查看 -->
+      <div
+        v-if="showAsrResultModal && asrResultModalDetail"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      >
+        <div class="bg-white rounded-[24px] shadow-xl p-5 w-[92vw] max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">
+          <div class="flex items-start justify-between gap-4 mb-4">
+            <div class="min-w-0">
+              <h3 class="text-lg font-medium break-words">{{ $t('excelAsr.resultDetailTitle') }}</h3>
+              <p class="text-sm text-slate-700 mt-1 break-words">
+                {{ asrResultModalDetail.title || $t('excelExecution.rowFallbackTitle', { row: asrResultModalDetail.excel_row }) }}
+              </p>
+              <p v-if="selectedFile" class="text-xs text-gray-400 mt-0.5 break-all">{{ selectedFile }}</p>
+            </div>
+            <button @click="closeAsrResultModal" class="text-gray-500 hover:text-gray-700">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="overflow-y-auto pr-1 space-y-4">
+            <!-- 多段行：顶部先给整行总览，段级明细在下方卡片逐段展示 -->
+            <div
+              v-if="asrResultModalDetail.is_multi"
+              class="rounded-[20px] border border-slate-200 bg-white px-4 py-3 flex flex-wrap items-center gap-2"
+            >
+              <span class="text-xs font-medium text-slate-400">{{ $t('excelAsr.overallResult') }}</span>
+              <span
+                v-if="getRowOverallResult(rowRunMeta[asrResultModalIndex])"
+                class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
+                :class="getAsrResultBadgeClass(getRowOverallResult(rowRunMeta[asrResultModalIndex]))"
+              >
+                {{ getRowOverallResult(rowRunMeta[asrResultModalIndex]) }}
+              </span>
+              <span v-if="Number.isFinite(getRowOverallScore(rowRunMeta[asrResultModalIndex]))" class="text-sm font-semibold text-slate-700">
+                {{ formatAsrScore(getRowOverallScore(rowRunMeta[asrResultModalIndex])) }}
+              </span>
+            </div>
+            <div
+              v-for="(seg, si) in asrResultModalDetail.segments"
+              :key="si"
+              class="rounded-[20px] border border-slate-200 bg-slate-50/60 px-4 py-4"
+            >
+              <div class="flex flex-wrap items-center gap-2 mb-3">
+                <span v-if="asrResultModalDetail.is_multi" class="text-xs font-medium text-slate-400">
+                  {{ $t('excelAsr.segmentNo', { index: si + 1 }) }}
+                </span>
+                <span
+                  v-if="seg.asr_result"
+                  class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
+                  :class="getAsrResultBadgeClass(seg.asr_result)"
+                >
+                  {{ seg.asr_result }}
+                </span>
+                <span v-if="Number.isFinite(seg.asr_score)" class="text-sm font-semibold text-slate-700">
+                  {{ formatAsrScore(seg.asr_score) }}
+                </span>
+                <span
+                  v-if="seg.reference_path || seg.comparison_source"
+                  class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500"
+                >
+                  {{ $t('excelAsr.comparisonSource', { source: getComparisonSourceLabel(seg) }) }}
+                </span>
+              </div>
+
+              <div v-if="seg.asr_result === 'NO_REF'" class="mb-2.5 text-xs leading-5 text-amber-600">
+                {{ $t('excelAsr.unjudgeable') }}
+              </div>
+
+              <div v-if="seg.reference_text" class="mb-2.5">
+                <p class="mb-1 text-xs font-medium text-slate-400">{{ $t('excelAsr.refTextLabel') }}</p>
+                <p class="text-sm leading-6 text-slate-800 break-words whitespace-pre-wrap">{{ seg.reference_text }}</p>
+              </div>
+              <div v-if="seg.tts_text && seg.tts_text !== seg.reference_text" class="mb-2.5">
+                <p class="mb-1 text-xs font-medium text-slate-400">{{ $t('excelAsr.deviceLogTextLabel') }}</p>
+                <p class="text-sm leading-6 text-slate-800 break-words whitespace-pre-wrap">{{ seg.tts_text }}</p>
+              </div>
+              <div v-if="seg.transcribed_text">
+                <p class="mb-1 text-xs font-medium text-slate-400">{{ $t('excelAsr.recognizedTextLabel') }}</p>
+                <p class="text-sm leading-6 text-slate-800 break-words whitespace-pre-wrap">{{ seg.transcribed_text }}</p>
+              </div>
+
+              <div
+                v-if="seg.compare_result_path || seg.audio_path || seg.transcript_path"
+                class="mt-3 space-y-1.5 border-t border-slate-200/80 pt-2.5"
+              >
+                <p v-if="seg.compare_result_path" class="text-xs leading-5 break-all">
+                  <span class="mr-1.5 text-slate-400">{{ $t('excelAsr.fileCompareReportLabel') }}</span>
+                  <span class="font-mono text-slate-600 select-all">{{ seg.compare_result_path }}</span>
+                </p>
+                <p v-if="seg.transcript_path" class="text-xs leading-5 break-all">
+                  <span class="mr-1.5 text-slate-400">{{ $t('excelAsr.fileTranscriptLabel') }}</span>
+                  <span class="font-mono text-slate-600 select-all">{{ seg.transcript_path }}</span>
+                </p>
+                <p v-if="seg.audio_path" class="text-xs leading-5 break-all">
+                  <span class="mr-1.5 text-slate-400">{{ $t('excelAsr.fileAudioLabel') }}</span>
+                  <span class="font-mono text-slate-600 select-all">{{ seg.audio_path }}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 flex justify-end">
+            <button class="btn btn-secondary" @click="closeAsrResultModal">
+              {{ $t('common.close') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <input
         ref="fileInput"
         type="file"
@@ -872,6 +952,8 @@ const isBatchExecuting = ref(false)
 const executionResults = ref([])
 const rowRunMeta = ref({})
 const latestBatchReport = ref(null)
+const showAsrResultModal = ref(false)
+const asrResultModalIndex = ref(null)
 const showCaseEditModal = ref(false)
 const showValidationResultModal = ref(false)
 const fileInput = ref(null)
@@ -897,7 +979,8 @@ const showExecutionSettings = ref(false)
 const executionMode = ref('single')
 const enableRecording = ref(true)
 const enableVerification = ref(true)
-const matchThreshold = ref(0.85)
+// 比对判定阈值默认 0.5（通过率 50%），与后端 ASR_PASS_THRESHOLD_DEFAULT 保持一致
+const matchThreshold = ref(0.5)
 // 图片校验参数（后端 customization.json 全局区，image_service 运行时读取）
 const colorMinSimilarity = ref(0.4)
 const colorWeight = ref(0.2)
@@ -1223,22 +1306,73 @@ const parseCommandToken = (raw, index) => {
   return { id: `cmd-${index}`, raw: String(raw).trim(), key, repeat, delay, meta: meta.join(' / '), index }
 }
 
+// 逻辑名按用户写进 Excel 的原文显示，但执行高亮只能按设备真正收到的按键名匹配，
+// 所以显示 token 上挂一段 [index, indexEnd) 指向它在展开序列里的位置。
 const getRowCommandTokens = (row) => {
-  const commands = row?.commands || []
-  return commands.map((cmd, i) => parseCommandToken(cmd, i)).filter(Boolean)
+  const display = Array.isArray(row?.display_commands) ? row.display_commands : null
+  const offsets = Array.isArray(row?.command_offsets) ? row.command_offsets : null
+  const expanded = Array.isArray(row?.commands) ? row.commands : null
+
+  if (display?.length) {
+    let cursor = 0
+    return display
+      .map((raw, i) => {
+        const offset = offsets?.[i]
+        const indexEnd = Number.isInteger(offset) ? offset : cursor + 1
+        const token = parseCommandToken(raw, cursor)
+        cursor = indexEnd
+
+        if (!token) {
+          return null
+        }
+
+        token.indexEnd = indexEnd
+        if (expanded?.length) {
+          // 悬浮提示给出真正会发出去的按键串，只有显示层是逻辑名
+          token.expandedText = expanded.slice(token.index, indexEnd).join(', ')
+        }
+        return token
+      })
+      .filter(Boolean)
+  }
+
+  return (row?.commands || []).map((cmd, i) => parseCommandToken(cmd, i)).filter(Boolean)
+}
+
+// 执行序列：展开后的按键串，高亮按它匹配——设备发出来的是真实按键名，
+// 一条逻辑名在它里面占连续的好几个位置。
+const getRowExecutionTokens = (row) => {
+  const expanded = Array.isArray(row?.commands) && row.commands.length
+    ? row.commands
+    : getRowCommandTokens(row).map((token) => token.raw)
+
+  return expanded.map((cmd, i) => parseCommandToken(cmd, i)).filter(Boolean)
 }
 
 // 指令动效：跟踪当前执行到哪条指令 + 重复次数 + 耗时
 const rowActiveCommandIndex = ref({})
 const rowCommandProgress = ref({})  // { [rowIndex]: { repeat: '1/8', elapsed: '0.3s' } }
 
+const getCommandSpanEnd = (cmd) => (Number.isInteger(cmd.indexEnd) ? cmd.indexEnd : cmd.index + 1)
+
+// 一条逻辑名在展开序列里占一段，因此判「这条是否正在执行」用的是区间包含而非位置
+// 相等——逻辑名内部的任意一步跑到，整条都该亮着。
 const isCommandActive = (rowIndex, cmd) => {
   const activeIdx = rowActiveCommandIndex.value[rowIndex]
-  return activeIdx !== undefined && cmd.index === activeIdx
+  if (!Number.isInteger(activeIdx)) return false
+  return activeIdx >= cmd.index && activeIdx < getCommandSpanEnd(cmd)
 }
 
 const getCommandProgress = (rowIndex, cmd) => {
   if (!isCommandActive(rowIndex, cmd)) return ''
+
+  const span = getCommandSpanEnd(cmd) - cmd.index
+  if (span > 1) {
+    // 逻辑名展开成多条：显示它内部跑到第几步，比整条干亮着有信息量
+    const step = rowActiveCommandIndex.value[rowIndex] - cmd.index + 1
+    return `${Math.min(step, span)}/${span}`
+  }
+
   const progress = rowCommandProgress.value[rowIndex]
   if (!progress?.repeat) return '...'
   return progress.repeat
@@ -1285,10 +1419,13 @@ const buildAsrBatchReportRows = (rowIndexes) => {
     const row = validRows[rowIndex - 1] || {}
     const meta = rowRunMeta.value[rowIndex] || {}
     const score = Number.isFinite(meta.asr_score) ? meta.asr_score : null
+    // 报告行状态取行级聚合结论（任一段 FAIL 即整行 FAIL），与界面徽标同一口径；
+    // meta.asr_result 是「最后一段」的结果，多段用例下会与整行结论不符
+    const overall = getRowOverallResult(meta) || ''
     return {
       row_index: rowIndex,
       case_title: row.title || t('excelExecution.rowFallbackTitle', { row: rowIndex }),
-      asr_result: meta.asr_result || '',
+      asr_result: overall,
       asr_score: score,
       transcribed_text: meta.transcribed_text || '',
       tts_text: meta.tts_text || '',
@@ -1297,7 +1434,7 @@ const buildAsrBatchReportRows = (rowIndexes) => {
       audio_path: meta.audio_path || '',
       transcript_path: meta.transcript_path || '',
       compare_result_path: meta.compare_result_path || '',
-      note: meta.asr_result === 'NO_REF' ? t('excelAsr.noReference') : ''
+      note: overall === 'NO_REF' ? t('excelAsr.unjudgeable') : ''
     }
   })
 }
@@ -1644,6 +1781,16 @@ const saveCaseFields = async () => {
       if (hasMeaningfulValue(rowData.oriStep) || hasMeaningfulValue(rowData.preScript) || Array.isArray(rowData.commands)) {
         rowData.oriStep = editingCaseForm.ori_step
         rowData.preScript = editingCaseForm.pre_script
+
+        // 前端手里只有刚填的原文，算不出「原始段 → 展开条数」的映射（要别名字典），
+        // 先按原文一对一显示；下一次 analyze 会把映射与展开结果补回来
+        const nextCommands = [editingCaseForm.ori_step, editingCaseForm.pre_script]
+          .flatMap((value) => String(value || '').split(/[\r\n,，]+/))
+          .map((item) => item.trim())
+          .filter((item) => hasMeaningfulValue(item))
+        rowData.commands = nextCommands
+        rowData.display_commands = nextCommands
+        rowData.command_offsets = null
       } else {
         rowData.step = editingCaseForm.ori_step
       }
@@ -1796,16 +1943,10 @@ const deleteFile = async (file) => {
   }
 }
 
-// 将单条执行结果投影到全局进度 store（ASR 模块）
+// 将单条执行结果投影到全局进度 store（ASR 模块）；
+// 复用行级徽标的聚合结果，避免进度统计与表格判定出现两套口径
 const finalizeAsrRow = (index) => {
-  const meta = rowRunMeta.value[index]
-  let passed = false
-  if (meta?.segments && meta.segments.length > 0) {
-    passed = meta.segments.every((seg) => seg.asr_result === 'PASS')
-  } else {
-    passed = meta?.asr_result === 'PASS'
-  }
-  recordRowResult({ passed })
+  recordRowResult({ passed: getRowOverallResult(rowRunMeta.value[index]) === 'PASS' })
 }
 
 // 互斥兜底：其它模块执行中时不允许启动 ASR 执行
@@ -1903,7 +2044,8 @@ const executeAsrRowByIndex = (index) => {
       signal: abortController.signal,
       body: JSON.stringify({
         file_name: selectedFile.value,
-        row_index: index
+        row_index: index,
+        match_threshold: matchThreshold.value
       })
     })
       .then(async (response) => {
@@ -1956,7 +2098,8 @@ const executeAsrRowByIndex = (index) => {
                 const progressInfo = parseCommandProgressFromMessage(msg)
                 if (progressInfo) {
                   const row = excelAnalysis.value?.valid_rows?.[index - 1]
-                  const tokens = getRowCommandTokens(row || { commands: [] })
+                  // 按展开序列定位：SSE 回来的是真实按键名，逻辑名在它里面占连续几条
+                  const tokens = getRowExecutionTokens(row || {})
                   const currentActiveIdx = rowActiveCommandIndex.value[index] ?? 0
 
                   // 从当前活跃位置开始查找匹配的指令（避免匹配到同名的前一条）
@@ -2012,7 +2155,8 @@ const executeAsrRowByIndex = (index) => {
                     reference_path: Object.prototype.hasOwnProperty.call(result, 'reference_path') ? (result.reference_path || '') : '',
                     audio_path: Object.prototype.hasOwnProperty.call(result, 'audio_path') ? (result.audio_path || '') : '',
                     transcript_path: Object.prototype.hasOwnProperty.call(result, 'transcript_path') ? (result.transcript_path || '') : '',
-                    compare_result_path: Object.prototype.hasOwnProperty.call(result, 'compare_result_path') ? (result.compare_result_path || '') : ''
+                    compare_result_path: Object.prototype.hasOwnProperty.call(result, 'compare_result_path') ? (result.compare_result_path || '') : '',
+                    comparison_source: Object.prototype.hasOwnProperty.call(result, 'comparison_source') ? (result.comparison_source || '') : ''
                   }
 
                   // 更新段数组
@@ -2266,6 +2410,105 @@ const getAsrResultBadgeClass = (result) => {
   return 'bg-slate-100 text-slate-600'
 }
 
+// 行级总览：多段时「全过才 PASS」——任一段 FAIL 即整行 FAIL。NO_REF 段（缺参考
+// 也没捕获到 TTS）是采集或素材问题而非设备不达标，不参与判定，一个可判定的段都
+// 没有时沿用 NO_REF；单段（或尚无段数组的兼容态）直接取顶层字段，等价于按该段
+// 单独判定。判定口径需与后端 _aggregate_verdict 一致，两处改动必须同步
+const getRowOverallResult = (meta) => {
+  if (!meta) {
+    return ''
+  }
+  const segments = Array.isArray(meta.segments) ? meta.segments.filter(Boolean) : []
+  const results = segments.length > 0 ? segments.map((seg) => seg.asr_result) : [meta.asr_result]
+  const present = results.filter(Boolean)
+  if (present.length === 0) {
+    return ''
+  }
+  const judged = present.filter((result) => result === 'PASS' || result === 'FAIL')
+  if (judged.length === 0) {
+    return 'NO_REF'
+  }
+  return judged.every((result) => result === 'PASS') ? 'PASS' : 'FAIL'
+}
+
+// 行级分数：多段时取各段均值；任一段无有效分数则视为不可汇总，返回 null
+const getRowOverallScore = (meta) => {
+  if (!meta) {
+    return null
+  }
+  const segments = Array.isArray(meta.segments) && meta.segments.length > 0
+    ? meta.segments.filter(Boolean)
+    : null
+  if (segments) {
+    const scores = segments.map((seg) => seg.asr_score).filter((score) => Number.isFinite(score))
+    if (scores.length !== segments.length) {
+      return null
+    }
+    return scores.reduce((sum, score) => sum + score, 0) / scores.length
+  }
+  return Number.isFinite(meta.asr_score) ? meta.asr_score : null
+}
+
+// ───────────────────── ASR 结果详情弹窗 ─────────────────────
+// 结果列只显示简短状态；详情弹窗聚合行内段元数据供逐段查看
+const asrResultModalDetail = computed(() => {
+  if (asrResultModalIndex.value === null) {
+    return null
+  }
+  const meta = rowRunMeta.value[asrResultModalIndex.value]
+  if (!meta) {
+    return null
+  }
+
+  let segments
+  if (Array.isArray(meta.segments) && meta.segments.length > 0) {
+    segments = meta.segments
+      .map((seg, index) => ({ ...seg, segment_index: index }))
+      .filter((seg) => (
+        seg.asr_result
+        || Number.isFinite(seg.asr_score)
+        || seg.reference_text
+        || seg.transcribed_text
+        || seg.tts_text
+      ))
+  } else if (meta.asr_result || meta.reference_text || meta.transcribed_text || meta.tts_text || Number.isFinite(meta.asr_score)) {
+    segments = [{ ...meta, segment_index: 0 }]
+  } else {
+    return null
+  }
+  if (segments.length === 0) {
+    return null
+  }
+
+  const row = excelAnalysis.value?.valid_rows?.[asrResultModalIndex.value - 1] || {}
+  return {
+    title: row.title || '',
+    excel_row: row.row ?? asrResultModalIndex.value,
+    is_multi: segments.length > 1,
+    segments
+  }
+})
+
+const openAsrResultModal = (index) => {
+  asrResultModalIndex.value = index
+  showAsrResultModal.value = true
+}
+
+const closeAsrResultModal = () => {
+  showAsrResultModal.value = false
+  asrResultModalIndex.value = null
+}
+
+const getComparisonSourceLabel = (seg) => {
+  if (seg.comparison_source === 'tts') {
+    return t('excelAsr.sourceDeviceLog')
+  }
+  if (seg.comparison_source === 'reference') {
+    return t('excelAsr.sourceExcelReference')
+  }
+  return seg.reference_path || ''
+}
+
 const handlePrevPage = () => {
   if (currentPage.value > 1) {
     currentPage.value -= 1
@@ -2325,7 +2568,8 @@ watch(activeModelName, (nextModel, previousModel) => {
   }
 })
 
-const ASR_STATE_KEY = 'checkpilot.asrExecution.state'
+// v2：判定阈值默认改为 0.5，旧版本地存储的阈值（0.85 时代）不再恢复
+const ASR_STATE_KEY = 'checkpilot.asrExecution.state.v2'
 
 const restoreAsrState = () => {
   try {

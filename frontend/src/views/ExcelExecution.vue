@@ -357,8 +357,25 @@
                       <div v-if="showExecutionSettings" class="mb-4 rounded-xl border border-gray-200 bg-gray-50/80 p-4">
                         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
-                          <!-- 匹配阈值 -->
+                          <!-- 校验方式（全局配置，存后端 customization.json，与图片校验参数同区） -->
                           <div class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">{{ $t('excelExecution.verifyEngineLabel') }}</label>
+                            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                              <button
+                                class="px-3 py-1.5 flex-1 transition-colors"
+                                :class="verifyEngine === 'opencv' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                @click="verifyEngine = 'opencv'"
+                              >OpenCV</button>
+                              <button
+                                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                                :class="verifyEngine === 'airtest' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                @click="verifyEngine = 'airtest'"
+                              >Airtest</button>
+                            </div>
+                          </div>
+
+                          <!-- 匹配阈值（仅 OpenCV 引擎消费，Airtest 用下面的 airtest 阈值） -->
+                          <div v-if="verifyEngine === 'opencv'" class="flex flex-col gap-1.5">
                             <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">匹配阈值</label>
                             <div class="flex items-center gap-2">
                               <input
@@ -518,7 +535,7 @@
                           </div>
 
                           <!-- 颜色相似度下限 -->
-                          <div class="flex flex-col gap-1.5">
+                          <div v-if="verifyEngine === 'opencv'" class="flex flex-col gap-1.5">
                             <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">颜色相似度下限</label>
                             <div class="flex items-center gap-2">
                               <input
@@ -541,7 +558,7 @@
                           </div>
 
                           <!-- 颜色权重 -->
-                          <div class="flex flex-col gap-1.5">
+                          <div v-if="verifyEngine === 'opencv'" class="flex flex-col gap-1.5">
                             <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">颜色权重</label>
                             <div class="flex items-center gap-2">
                               <input
@@ -564,7 +581,7 @@
                           </div>
 
                           <!-- 特征相似度下限 -->
-                          <div class="flex flex-col gap-1.5">
+                          <div v-if="verifyEngine === 'opencv'" class="flex flex-col gap-1.5">
                             <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">特征相似度下限</label>
                             <div class="flex items-center gap-2">
                               <input
@@ -584,6 +601,65 @@
                                 class="form-input w-16 text-center text-sm"
                               >
                             </div>
+                          </div>
+
+                          <!-- airtest 置信度阈值（默认 0.85，非 Airtest IDE 的 0.7：实测 0.7 会放过约 6% 的未命中） -->
+                          <div v-if="verifyEngine === 'airtest'" class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">{{ $t('excelExecution.airtestThresholdLabel') }}</label>
+                            <div class="flex items-center gap-2">
+                              <input
+                                v-model.number="airtestThreshold"
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="flex-1"
+                              >
+                              <input
+                                v-model.number="airtestThreshold"
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="form-input w-16 text-center text-sm"
+                              >
+                            </div>
+                          </div>
+
+                          <!-- airtest 比色（默认灰度匹配，对齐 Airtest 的 Template(rgb=False)） -->
+                          <div v-if="verifyEngine === 'airtest'" class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">{{ $t('excelExecution.airtestRgbLabel') }}</label>
+                            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                              <button
+                                class="px-3 py-1.5 flex-1 transition-colors"
+                                :class="!airtestRgb ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                @click="airtestRgb = false"
+                              >{{ $t('excelExecution.airtestRgbOff') }}</button>
+                              <button
+                                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                                :class="airtestRgb ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                @click="airtestRgb = true"
+                              >{{ $t('excelExecution.airtestRgbOn') }}</button>
+                            </div>
+                            <span class="text-[11px] text-gray-400">{{ $t('excelExecution.airtestRgbHint') }}</span>
+                          </div>
+
+                          <!-- airtest 匹配策略（默认单尺度：本项目参考图与设备截图多为同分辨率） -->
+                          <div v-if="verifyEngine === 'airtest'" class="flex flex-col gap-1.5">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">{{ $t('excelExecution.airtestStrategyLabel') }}</label>
+                            <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                              <button
+                                class="px-3 py-1.5 flex-1 transition-colors"
+                                :class="airtestStrategy === 'tpl' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                @click="airtestStrategy = 'tpl'"
+                              >{{ $t('excelExecution.airtestStrategyTpl') }}</button>
+                              <button
+                                class="px-3 py-1.5 flex-1 transition-colors border-l border-gray-200"
+                                :class="airtestStrategy === 'mstpl' ? 'bg-[#e8f2fe] text-[#1890ff]' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                                @click="airtestStrategy = 'mstpl'"
+                              >{{ $t('excelExecution.airtestStrategyMstpl') }}</button>
+                            </div>
+                            <span class="text-[11px] text-gray-400">{{ $t('excelExecution.airtestStrategyHint') }}</span>
                           </div>
 
                         </div>
@@ -659,7 +735,7 @@
                                       :key="command.id"
                                       class="excel-step-command"
                                       :class="{ 'excel-step-command-active': isRowCommandActive(item.idx, command) }"
-                                      :title="command.raw"
+                                      :title="command.expandedText || command.raw"
                                     >
                                       <span class="excel-step-command-key">{{ command.key }}</span>
                                       <span v-if="command.meta" class="excel-step-command-meta">{{ command.meta }}</span>
@@ -681,7 +757,7 @@
                                     v-for="command in getRowCommandSequence(item.row)"
                                     :key="command.id"
                                     class="excel-step-command"
-                                    :title="command.raw"
+                                    :title="command.expandedText || command.raw"
                                   >
                                     <span class="excel-step-command-key">{{ command.key }}</span>
                                     <span v-if="command.meta" class="excel-step-command-meta">{{ command.meta }}</span>
@@ -1076,7 +1152,7 @@
                     </button>
                   </div>
 
-                  <div v-if="verifyImagePreviewList.length > 1" class="mb-2 flex flex-wrap items-center gap-2">
+                  <div v-if="verifyImagePreviewList.length > 1" class="mb-2 flex flex-wrap items-center gap-2 shrink-0 max-h-[6rem] overflow-y-auto">
                     <span class="text-xs text-gray-500">
                       {{ $t('excelExecution.verifyPreviewCounter', {
                         current: verifyImagePreviewActiveIndex + 1,
@@ -1100,11 +1176,12 @@
                     </button>
                   </div>
 
-                  <div class="flex justify-center items-center flex-1 min-h-0">
+                  <!-- 容器必须裁剪：图片比容器大时，items-center 会让它上下同时溢出盖住 X 和切换按钮，点不动 -->
+                  <div class="flex justify-center items-center flex-1 min-h-0 overflow-hidden">
                     <img
                       v-if="verifyImageUrl"
                       :src="verifyImageUrl"
-                      class="max-h-full max-w-full object-contain"
+                      class="max-h-[calc(70vh_-_12rem)] max-w-full object-contain"
                       :alt="$t('excelExecution.verifyImageAlt')"
                     >
                     <span v-else class="text-gray-400">{{ $t('excelExecution.verifyImageNotFound') }}</span>
@@ -1730,6 +1807,52 @@ const saveColorVerifyConfig = async () => {
 watch([colorMinSimilarity, colorWeight, featureMinSimilarity], () => {
   if (colorVerifyConfigTimer) clearTimeout(colorVerifyConfigTimer)
   colorVerifyConfigTimer = setTimeout(saveColorVerifyConfig, 500)
+})
+
+// 校验引擎（全局开关，同样落在后端 customization.json）
+// opencv 走请求里的 match_threshold；airtest 忽略它，改用下面的 airtest 阈值
+const verifyEngine = ref('opencv')
+const airtestThreshold = ref(0.85)
+const airtestRgb = ref(false)
+const airtestStrategy = ref('tpl')
+let verifyEngineConfigTimer = null
+
+const loadVerifyEngineConfig = async () => {
+  try {
+    const res = await fetch('/api/customization/verify-engine-config')
+    if (res.ok) {
+      const data = await res.json()
+      const threshold = Number(data.airtest_threshold)
+      verifyEngine.value = data.verify_engine === 'airtest' ? 'airtest' : 'opencv'
+      airtestThreshold.value = Number.isFinite(threshold) ? threshold : 0.85
+      airtestRgb.value = data.airtest_rgb === true
+      airtestStrategy.value = data.airtest_strategy === 'mstpl' ? 'mstpl' : 'tpl'
+    }
+  } catch (error) {
+    console.error('加载图片校验引擎配置失败:', error)
+  }
+}
+
+const saveVerifyEngineConfig = async () => {
+  try {
+    await fetch('/api/customization/verify-engine-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        verify_engine: verifyEngine.value,
+        airtest_threshold: airtestThreshold.value,
+        airtest_rgb: airtestRgb.value,
+        airtest_strategy: airtestStrategy.value,
+      })
+    })
+  } catch (error) {
+    console.error('保存图片校验引擎配置失败:', error)
+  }
+}
+
+watch([verifyEngine, airtestThreshold, airtestRgb, airtestStrategy], () => {
+  if (verifyEngineConfigTimer) clearTimeout(verifyEngineConfigTimer)
+  verifyEngineConfigTimer = setTimeout(saveVerifyEngineConfig, 500)
 })
 const MAX_PERSISTED_EXECUTION_RESULTS = 200
 const EXCEL_EXECUTION_STORAGE_KEY = 'checkpilot.excelExecution.state'
@@ -2455,6 +2578,7 @@ onMounted(async () => {
   await Promise.all([loadCurrentDevice(), loadExcelFiles(), loadImageReports({ silent: true })])
   await restoreExecutionState()
   loadColorVerifyConfig()
+  loadVerifyEngineConfig()
   // 点击页面任意位置关闭结果弹窗
   document.addEventListener('click', closeResultPopover)
   // 注册全局“停止执行”回调，供右上角进度卡片按钮调用
@@ -3887,6 +4011,10 @@ const saveCaseFields = async () => {
         rowData.step = editingCaseForm.ori_step
       }
       rowData.commands = nextCommands
+      // 前端手里只有刚填的原文，算不出「原始段 → 展开条数」的映射（要别名字典），
+      // 先按原文一对一显示；下一次 analyze 会把映射与展开结果补回来
+      rowData.display_commands = nextCommands
+      rowData.command_offsets = null
       if (Array.isArray(rowData.command)) {
         rowData.command = [...nextCommands]
       }
@@ -4000,37 +4128,74 @@ const buildRowCommandToken = (rawCommand, sequenceIndex, groupIndex, commandInde
   }
 }
 
+// 逻辑名按用户写进 Excel 的原文显示，但执行高亮只能按设备真正收到的按键名匹配，
+// 所以显示 token 上挂一段 [sequenceIndex, sequenceEnd) 指向它在展开序列里的位置。
+const buildDisplayCommandTokens = (group) => {
+  let cursor = group.startIndex
+
+  return group.rawValues
+    .map((raw, commandIndex) => {
+      const offset = group.offsets?.[commandIndex]
+      const spanEnd = Number.isInteger(offset) ? offset : cursor + 1
+      const token = buildRowCommandToken(raw, cursor, group.groupIndex, commandIndex)
+      cursor = spanEnd
+
+      if (!token) {
+        return null
+      }
+
+      token.sequenceEnd = spanEnd
+      if (group.expanded?.length) {
+        // 悬浮提示给出真正会发出去的按键串，只有显示层是逻辑名
+        token.expandedText = group.expanded.slice(token.sequenceIndex, spanEnd).join(', ')
+      }
+      return token
+    })
+    .filter(Boolean)
+}
+
 const getRowCommandGroups = (row) => {
   const groups = []
   const seenSources = new Set()
   let sequenceIndex = 0
 
-  const addGroup = (sourceValue) => {
-    const commands = normalizeCommandList(sourceValue)
-    if (!commands.length) {
+  const addGroup = (sourceValue, spanSource = null) => {
+    const rawValues = normalizeCommandList(sourceValue)
+    if (!rawValues.length) {
       return
     }
 
-    const signature = commands.join('|')
+    const signature = rawValues.join('|')
     if (seenSources.has(signature)) {
       return
     }
 
     seenSources.add(signature)
     const groupIndex = groups.length
-    const parsedCommands = commands
-      .map((command, commandIndex) => buildRowCommandToken(command, sequenceIndex + commandIndex, groupIndex, commandIndex))
-      .filter(Boolean)
+    const parsedCommands = buildDisplayCommandTokens({
+      rawValues,
+      groupIndex,
+      startIndex: sequenceIndex,
+      offsets: Array.isArray(spanSource?.offsets) ? spanSource.offsets : null,
+      expanded: Array.isArray(spanSource?.expanded) ? spanSource.expanded : null
+    })
 
     if (!parsedCommands.length) {
       return
     }
 
-    sequenceIndex += parsedCommands.length
+    sequenceIndex = parsedCommands[parsedCommands.length - 1].sequenceEnd
     groups.push({
       id: `step-group-${groupIndex}`,
       commands: parsedCommands
     })
+  }
+
+  // 后端给了「原始段 → 展开条数」的映射就照原文显示，
+  // 逻辑名显示成逻辑名，展开结果留给高亮与悬浮提示用
+  if (Array.isArray(row?.display_commands) && row.display_commands.length > 0) {
+    addGroup(row.display_commands, { offsets: row.command_offsets, expanded: row.commands })
+    return groups
   }
 
   if (Array.isArray(row?.commands) && row.commands.length > 0) {
@@ -4055,13 +4220,27 @@ const getRowCommandGroups = (row) => {
   return groups
 }
 
+// 显示序列：每个 chip 对应 Excel 里的一个原始段（可能是逻辑名）
 const getRowCommandSequence = (row) => {
   return getRowCommandGroups(row).flatMap((group) => group.commands)
 }
 
+// 执行序列：展开后的按键串。高亮只能按它匹配，因为设备发出来的是真实按键名，
+// 一条逻辑名在它里面占连续的好几个位置。
+const getRowExecutionSequence = (row) => {
+  const expanded = normalizeCommandList(row?.commands)
+  const rawValues = expanded.length
+    ? expanded
+    : getRowCommandSequence(row).map((command) => command.raw)
+
+  return rawValues
+    .map((command, index) => buildRowCommandToken(command, index, 0, index))
+    .filter(Boolean)
+}
+
 const getRowCommandSequenceTitle = (row) => {
   return getRowCommandSequence(row)
-    .map((command) => command.raw)
+    .map((command) => command.expandedText || command.raw)
     .join(', ')
 }
 
@@ -4119,7 +4298,8 @@ const updateRowExecutionProgress = (rowIndex, message) => {
     return
   }
 
-  const sequence = getRowCommandSequence(rowData)
+  // 按展开序列定位：SSE 回来的是真实按键名，逻辑名在它里面占连续几条
+  const sequence = getRowExecutionSequence(rowData)
   if (!sequence.length) {
     return
   }
@@ -4156,13 +4336,22 @@ const updateRowExecutionProgress = (rowIndex, message) => {
   })
 }
 
+const getCommandSpanEnd = (command) => {
+  return Number.isInteger(command.sequenceEnd) ? command.sequenceEnd : command.sequenceIndex + 1
+}
+
+// 一条逻辑名在展开序列里占一段，因此判「这条 chip 是否正在执行」用的是区间包含，
+// 而不是位置相等——逻辑名内部的任意一步跑到，整条 chip 都该亮着。
 const getRowCommandProgress = (rowIndex, command) => {
   const progress = rowExecutionProgress.value[rowIndex]
-  if (!progress || progress.sequenceIndex !== command.sequenceIndex) {
+  if (!progress || !Number.isInteger(progress.sequenceIndex)) {
     return null
   }
 
-  return progress
+  const isInsideSpan = progress.sequenceIndex >= command.sequenceIndex
+    && progress.sequenceIndex < getCommandSpanEnd(command)
+
+  return isInsideSpan ? progress : null
 }
 
 const isRowCommandActive = (rowIndex, command) => {
@@ -4171,7 +4360,18 @@ const isRowCommandActive = (rowIndex, command) => {
 
 const getRowCommandProgressText = (rowIndex, command) => {
   const progress = getRowCommandProgress(rowIndex, command)
-  if (!progress || command.repeat <= 1) {
+  if (!progress) {
+    return ''
+  }
+
+  const span = getCommandSpanEnd(command) - command.sequenceIndex
+  if (span > 1) {
+    // 逻辑名展开成多条：显示它内部跑到第几步，比整条干亮着有信息量
+    const step = progress.sequenceIndex - command.sequenceIndex + 1
+    return `${Math.min(step, span)}/${span}`
+  }
+
+  if (command.repeat <= 1) {
     return ''
   }
 

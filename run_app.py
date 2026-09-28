@@ -55,6 +55,7 @@ logging.getLogger('asyncio').addFilter(_AsyncioConnectionResetFilter())
 
 from backend.main import app as fastapi_app
 from backend.app.config import settings
+from backend.app.utils.uvicorn_logging import build_uvicorn_log_config
 
 def find_port(start=8000, end=8010):
   for p in range(start, end + 1):
@@ -68,7 +69,13 @@ def find_port(start=8000, end=8010):
   return start
 
 def run_server(port):
-  config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=port, log_level="info")
+  config = uvicorn.Config(
+    fastapi_app,
+    host="0.0.0.0",
+    port=port,
+    log_level="info",
+    log_config=build_uvicorn_log_config(),
+  )
   server = uvicorn.Server(config)
   t = threading.Thread(target=server.run, daemon=True)
   t.start()

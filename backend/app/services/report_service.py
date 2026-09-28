@@ -722,12 +722,19 @@ class ReportService:
             "PASS": "通过",
             "FAIL": "失败",
             "ERROR": "异常",
-            "NO_REF": "缺参考",
+            # NO_REF 涵盖多种不可判定成因：缺参考文本、录音静音、识别复读热词
+            "NO_REF": "无法判定",
             "BLOCKED": "阻塞",
             "SKIPPED": "跳过",
             "UNKNOWN": "待确认",
         }
         return mapping.get(status, status)
+
+    @staticmethod
+    def _engine_label(value: Any) -> str:
+        """比对引擎的展示名；旧报告没有引擎字段时按 opencv 显示。"""
+        engine = str(value or "").strip().lower()
+        return {"airtest": "Airtest", "opencv": "OpenCV"}.get(engine, "OpenCV")
 
     @staticmethod
     def _case_title(row: dict[str, Any]) -> str:
@@ -1041,6 +1048,14 @@ class ReportService:
                 ("color_score", "颜色相似"),
                 ("dino_score", "DINO 得分"),
                 ("aspect_ratio_score", "宽高比"),
+                # airtest 引擎：置信度与匹配位置（无这些键时自动不显示）
+                ("confidence", "匹配置信度"),
+                ("match_rect_x", "匹配区域 X"),
+                ("match_rect_y", "匹配区域 Y"),
+                ("match_rect_w", "匹配区域宽"),
+                ("match_rect_h", "匹配区域高"),
+                ("match_target_x", "中心点 X"),
+                ("match_target_y", "中心点 Y"),
             ]
             compare_content = ''.join(
                 (
@@ -1061,7 +1076,7 @@ class ReportService:
             # 状态行
             status_label = self._status_label(run.get("status"))
             score_text = self._format_scalar(run.get("score"))
-            engine = str(run.get("compare_engine") or "OpenCV").strip()
+            engine = self._engine_label(run.get("compare_engine"))
             status_html = (
                 f'<div class="report-field-grid">'
                 f'<div class="report-field-item"><span>测试结果</span><strong>{status_label}</strong></div>'
@@ -1139,12 +1154,16 @@ class ReportService:
         # 轮次切换器
         switcher_html = ''
         if has_multiple_runs:
-            buttons = ''.join(
-                f'<button class="report-run-tab" data-run-id="{case_id}-run-{run.get("run_index", i+1)}" '
-                f'{"class=\"report-run-tab report-run-tab-active\"" if i == 0 else "class=\"report-run-tab\""}'
-                f'>第 {run.get("run_index", i+1)} 轮</button>'
-                for i, run in enumerate(runs)
-            )
+            run_tab_buttons = []
+            for i, run in enumerate(runs):
+                # 首轮高亮；3.12 前 f-string 表达式内不允许反斜杠，class 值提前算好
+                tab_class = 'report-run-tab report-run-tab-active' if i == 0 else 'report-run-tab'
+                run_idx = run.get("run_index", i + 1)
+                run_tab_buttons.append(
+                    f'<button class="{tab_class}" data-run-id="{case_id}-run-{run_idx}">'
+                    f'第 {run_idx} 轮</button>'
+                )
+            buttons = ''.join(run_tab_buttons)
             switcher_html = f'<div class="report-run-switcher">{buttons}</div>'
 
         return (

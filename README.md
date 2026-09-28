@@ -20,7 +20,7 @@ CheckPilot 是一个面向 ADB 设备自动化测试的本地工作台，覆盖�
 - 数据处理：pandas、openpyxl、numpy
 - 图像处理：opencv-python-headless
 - 设备控制：Android Debug Bridge (ADB)
-- 可选 ASR：qwen-asr、sounddevice、torch
+- 可选 ASR：torch（CPU 版）、qwen-asr、transformers、sounddevice、librosa 等（已并入 requirements.txt，见下文）
 
 ## 项目结构
 
@@ -74,20 +74,16 @@ cd frontend
 npm install
 ```
 
-### 2. 安装 ASR 可选依赖
+### 2. 安装 ASR 依赖（已并入 requirements.txt）
 
-如果只使用设备控制、命令执行、图片校验和按键监听，不需要安装 ASR 依赖。
-
-如果需要启用 ASR 校验，建议在 Python 3.12 环境中额外安装：
+ASR 录音与推理所需依赖已加入 `backend/requirements.txt`（`sounddevice` 起至 `tqdm` 止的段落）。其中 `torch` 需先从官方 CPU 源单独安装，否则 `pip install -r` 会从 PyPI 拉取体积巨大的 CUDA 版：
 
 ```bash
-python -m pip install -U pip
-python -m pip install -U qwen-asr
-python -m pip install -U sounddevice
 python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r backend/requirements.txt
 ```
 
-ASR 页面会根据后端实际环境自动检测依赖状态，并在缺失时给出安装提示。安装完成后需要重启后端，再回到页面点击“刷新状态”。
+建议在 Python 3.12 环境中安装。`qwen-asr` 与 `transformers` + `librosa` 分别对应 Qwen3-ASR 和 Cohere Transcribe 两种模型后端，只使用一种后端时可删去另一种，以精简环境。ASR 页面会根据后端实际环境自动检测依赖状态，并在缺失时给出安装提示。安装完成后需要重启后端，再回到页面点击“刷新状态”。
 
 ## 启动方式
 
@@ -141,6 +137,7 @@ python run_app.py
 - 获取在线 ADB 设备列表。
 - 选择当前控制设备。
 - 当前设备断开后，系统会自动清理失效状态，避免继续返回陈旧设备信息。
+- 设备列表在 1.5 秒内复用上一次的扫描结果：首页、设备页、Excel 页会同时拉取设备列表，连点刷新也常见，合并后只跑一次 `adb devices`。代价是刚拔插设备后立刻刷新，最多 1.5 秒后才反映变化。
 
 ### 命令执行
 
@@ -170,6 +167,7 @@ python run_app.py
 - 支持“执行单行”“批量执行已选”“执行全部用例”。
 - 支持 TTS 标记：当 Excel 指令中出现独立的 `TTS` 时，系统会在该标记处开始录音，并把下一条命令作为录音窗口内的触发命令。
 - 当同名参考文本缺失或为空时，系统会回退为“识别文本 vs 捕获到的 TTS 文本”比对，而不是直接报错退出。
+- 一行用例可含多个 `TTS` 段，行级结论为“全过才 PASS”：任一段 FAIL 即整行 FAIL。无法判定的段（缺参考文本、录音静音、识别复读热词）不参与判定，一行里只有这类段时记“无法判定”。界面徽标、Excel `testResult` 回填、批量报告三处同一口径。
 
 ### 按键监听
 
@@ -198,6 +196,28 @@ python run_app.py
 - 指令通常来自 `oriStep` 和 `preScript`。
 - 命令格式为 `KEYNAME/REPEAT/DELAY`，多条命令以逗号分隔。
 - 对空值/NaN 会在解析阶段做归一化处理，避免把 `nan` 当作真实命令执行。
+
+### 指令别名（oriStep 工作表）
+
+同一工作簿里可以额外放一张名为 `oriStep` 的工作表，把一段常用按键序列起个别名：
+
+| oriStep | Key | DESCRIBE |
+| --- | --- | --- |
+| `OPENSETTING` | `HOME/1/5,SETTING/1/1,DOWN/9/1,OK/1/1` | 打开Setting |
+| `OPENHDMI2` | `HOME/1/5,SOURCE/1/1,DOWN/2/1,OK/1/1` | 打开HDMI2 |
+
+- 表头列名必须是 `oriStep`（别名）与 `Key`（按键串），大小写与首尾空格不敏感；多出的列（如 `DESCRIBE`）会被忽略。
+- `OSDCASE` 的 `oriStep` / `preScript` 列即可直接写别名，执行前自动展开成 `Key` 列的按键串。
+- 支持逐段混写：`OPENSETTING,DOWN/1/1` 会展开成 4 条导航命令再追加一条 `DOWN/1/1`。
+- 支持别名指向另一个别名（最多 5 层）；发现循环引用时保留原文并打告警日志，不会死循环。
+- 别名匹配不区分大小写；`Key` 列的值保持原样（`X:(0:3)` 这类写法不受影响）。
+- 逻辑名照这一列的写法补上次数/时间（`OPENCHILDCODE/1/3`）时后缀是**有含义**的：次数 = 整段按键串重复几遍，时间 = 整段跑完后、执行下一条命令前等多少秒。`OPENCHILDCODE/1/3` 即「跑一遍该导航，结束再等 3 秒」，展开为 `HOME/1/5,SETTING/1/1,DOWN/9/1,OK/1/1,DOWN/6/3`——秒数落在末条命令的延迟位上，因为对 `KEY/次数/延迟` 而言那一位本就是「发完这条之后等多久」，而末条发完正是整段结束的时刻。不写后缀则完全不影响展开结果。
+- 后缀只认正整数次数与非负数字延迟：`X:(1:3)` 这类随机次数对「整段导航」没有明确定义，此时保留原文并记告警日志，交给既有的「未知按键 / 命令格式错误」报错路径；展开结果的末条若是不带延迟位的写法（如裸 `TTS`），秒数无处安放，同样记告警并忽略。
+- 逻辑名与真实按键同名时以别名为准，后缀也照样生效（字典里若有 `HOME`，用例里的 `HOME/1/5` 会变成 `OK/1/5`），所以别名字典里不要出现与按键同名的逻辑名。
+- **用例列表里的指令 chips 显示的是你写进 Excel 的原文**——逻辑名就显示成 `OPENCHILDCODE/1/3`，不会撑开成它展开后的那一串按键；鼠标悬停可以看到真正会发出去的命令。展开只发生在执行链路，Excel 文件、编辑弹窗回显、写回 Excel 都始终是原文，不会被改写成按键串。
+- 执行中的高亮照旧按设备真正收到的按键名推进：一条逻辑名在展开序列里占连续几条，因此它内部任意一步跑到，整条 chip 都亮着并显示 `3/5` 这样的子步进度，而不是整条干亮着。
+- 字典里没有的名字**不做特殊处理**，仍按原有的「未知按键 / 命令格式错误」报错。
+- 找不到该工作表时功能自动关闭，老的用例文件行为完全不变。
 
 ### 图片校验资源
 
@@ -266,6 +286,10 @@ dist/AutoDeck.exe
 	- `monitor_key_mappings.json`
 	- `runtime_state.json`
 	- `asr_runtime_state.json`
+	- `asr_text_substitutions.json`（ASR 文本替换规则）
+	- `asr_hotwords.txt`（Qwen3-ASR 热词表，每行一词）
+
+最后两项由 `build_exe.bat` 在打包完成后自动复制到 `dist\`。若绕过脚本直接调用 PyInstaller，需自行把它们放到 exe 同级目录：冻结后 `WORKING_DIR` 即 exe 所在目录，且读取这两个文件时没有包内回退，缺失只会静默导致规则失效（同一段录音在开发机与交付包上可能得出不同结论）。
 
 ## 常见问题
 

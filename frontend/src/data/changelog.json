@@ -1,5 +1,167 @@
 [
   {
+    "version": "1.3.9-用例判定收紧",
+    "date": "2026-09-23",
+    "changes": {
+      "zh-CN": [
+        "变更：ASR 用例的行级结论由「按段通过率」改为「全过才 PASS」——一行里的多个 TTS 段只要有一段 FAIL，整行就判 FAIL。原先通过率高于 30% 就算过，一行 18 段里 6 段通过、12 段失败仍然显示 PASS",
+        "无法判定的段（缺参考文本、录音静音、识别复读热词）仍不参与判定：既不算通过也不拉低结论，一行里只有这类段时记「无法判定」；只有可判定段全过才判 PASS",
+        "修复：批量报告里每行的状态原先取的是「最后一段」的结果，多段用例下会与整行结论不符（如一段 FAIL 一段 PASS 的行在报告里记成通过）。现在报告与界面徽标、Excel testResult 回填统一走同一个行级结论",
+        "注意：判定收紧后，同一份用例重跑得到的通过率会明显低于升级前，历史报告之间不再可比；只有一个 TTS 段的用例（多数）判定不变"
+      ],
+      "en-US": [
+        "Changed: the ASR case verdict is now all-or-nothing instead of a segment pass-rate — if any TTS segment in a row fails, the whole row is FAIL. Previously anything above a 30% pass rate counted as passing, so a row with 18 segments could show PASS with 6 passing and 12 failing",
+        "Unjudgeable segments (missing reference, silent recording, model echoing the hotword list) still take no part in the verdict: they neither count as passing nor drag the result down, and a row made up only of them is reported as unjudgeable. A row passes only when every judgeable segment passes",
+        "Fixed: each row in a batch report used the last segment's result, which disagreed with the row verdict on multi-segment cases (a row with one FAIL and one PASS was reported as passing). The report, the on-screen badge and the Excel testResult write-back now share one row-level verdict",
+        "Note: with the stricter rule the pass rate of a re-run drops noticeably against pre-upgrade runs and older reports are no longer comparable; single-segment cases (the majority) are unaffected"
+      ]
+    }
+  },
+  {
+    "version": "1.3.8-录音去降速",
+    "date": "2026-09-23",
+    "changes": {
+      "zh-CN": [
+        "移除：录音后处理链路里的 0.9 倍降速环节整段删掉，现在只做 RMS 归一化与降噪，送进识别引擎的音频与设备实际播报等长同速；ASR 校验与 Excel 执行两个模块一致",
+        "注意：0.9 倍速会把音频拉长到约 1.11 倍时长，而识别结果对语速敏感，因此同一段录音的识别文本可能与升级前略有差异；已生成的录音文件不受影响",
+        "注意：librosa / scipy / soundfile 仍被降噪、音频读取与重采样使用，依赖清单不变"
+      ],
+      "en-US": [
+        "Removed: the 0.9x speed-reduction step is gone from the post-recording chain; audio is now only RMS-normalised and denoised, so what reaches the recogniser is as long and as fast as what the device actually played. The ASR and Excel-execution modules behave the same",
+        "Note: 0.9x stretched the audio to about 1.11x its length and recognition is sensitive to pace, so the transcript of a given recording may differ slightly from before the upgrade; recordings already written to disk are untouched",
+        "Note: librosa / scipy / soundfile are still used for noise reduction, audio loading and resampling, so the dependency list is unchanged"
+      ]
+    }
+  },
+  {
+    "version": "1.3.7-逻辑名",
+    "date": "2026-09-23",
+    "changes": {
+      "zh-CN": [
+        "修复：逻辑名后面补上次数/时间（如 OPENCHILDCODE/1/3）就不再被当成逻辑名了——oriStep 这一列的书写约定本来就是 KEY/次数/时间，补两个字段是最自然的写法，但字典只认整段相等，于是 OPENCHILDCODE/1/3 匹配不到 OPENCHILDCODE，执行时直接报「未知按键 OPENCHILDCODE」",
+        "现在逻辑名照 KEY/次数/时间 的写法补后缀同样会展开，而且后缀是有含义的：次数 = 整段按键串重复几遍，时间 = 整段跑完后、执行下一条命令前等多少秒。OPENCHILDCODE/1/3 就是「跑一遍该导航，结束再等 3 秒」",
+        "秒数落在展开结果末条命令的延迟位上，因为对 KEY/次数/延迟 而言那一位本就是「发完这条之后等多久」，而末条发完正是整段结束的时刻；不写后缀则完全不影响展开结果",
+        "后缀只认正整数次数与非负数字延迟：X:(1:3) 这类随机次数对「整段导航」没有明确定义，此时保留原文并记告警日志，交给既有的「未知按键」报错路径；展开结果的末条若是不带延迟位的写法（如裸 TTS），秒数无处安放，同样记告警并忽略",
+        "注意：逻辑名与真实按键同名时以别名为准且后缀照样生效（字典里若有 HOME，用例里的 HOME/1/5 会变成 OK/1/5），别名字典里不要出现与按键同名的逻辑名",
+        "变更：用例列表里的指令 chips 改为显示你写进 Excel 的原文——逻辑名就显示成 OPENCHILDCODE/1/3，不再撑开成它展开后的那一串按键；鼠标悬停可以看到真正会发出去的按键串。展开只发生在执行链路，Excel 文件、编辑弹窗回显、写回 Excel 都始终是原文",
+        "执行中的高亮照旧按设备真正收到的按键名推进：一条逻辑名在展开序列里占连续几条，因此它内部任意一步跑到，整条 chip 都亮着并显示 3/5 这样的子步进度，而不是整条干亮着",
+        "注意：该显示映射随分析结果一起返回，而分析结果按「文件路径 + 修改时间」缓存，所以升级后需重启后端（或改动一次 Excel 文件）才会生效；旧缓存下会退回改动前的显示（撑开成按键串），不会报错"
+      ],
+      "en-US": [
+        "Fixed: adding a repeat/delay to a logical name (e.g. OPENCHILDCODE/1/3) stopped it being treated as a logical name. The oriStep column is written as KEY/repeat/delay, so appending those two fields is the natural thing to do, but the dictionary only matched whole segments — OPENCHILDCODE/1/3 never matched OPENCHILDCODE and execution reported \"unknown key OPENCHILDCODE\"",
+        "A logical name written with a repeat/delay suffix now expands too, and the suffix is meaningful: the repeat is how many times the whole key sequence runs, and the delay is how many seconds to wait after it finishes before the next command. OPENCHILDCODE/1/3 means \"run that navigation once, then wait 3 seconds\"",
+        "The delay lands on the last expanded command's delay field, because for KEY/repeat/delay that field already means \"how long to wait after this one is sent\" and the last command finishing is exactly when the sequence ends; omitting the suffix leaves the expansion completely unchanged",
+        "Only a positive-integer repeat and a non-negative numeric delay are accepted: a random repeat such as X:(1:3) has no defined meaning for a whole navigation sequence, so the text is kept as-is with a warning and falls through to the usual \"unknown key\" error; if the expansion's last command has no delay field (a bare TTS), the seconds have nowhere to go and are dropped with a warning",
+        "Note: when a logical name collides with a real key name the alias wins and the suffix still applies (with HOME in the dictionary, a case's HOME/1/5 becomes OK/1/5), so do not put a key's name in the alias dictionary",
+        "Changed: the command chips in the case list now show exactly what you wrote in Excel — a logical name stays OPENCHILDCODE/1/3 instead of unrolling into its key sequence; hovering shows the keys that will actually be sent. Expansion happens only on the execution path, so the Excel file, the case editor and anything written back stay as written",
+        "Execution highlighting still advances by the key names the device actually receives: a logical name occupies several consecutive slots in the expanded sequence, so the whole chip lights up and shows sub-step progress such as 3/5 rather than sitting lit with no detail",
+        "Note: this display mapping ships with the analysis result, which is cached by file path plus modification time, so a backend restart (or touching the Excel file once) is needed after upgrading; against a stale cache the display falls back to the previous behaviour (unrolled key sequence) without erroring"
+      ]
+    }
+  },
+  {
+    "version": "1.3.6-设备扫描合并",
+    "date": "2026-09-23",
+    "changes": {
+      "zh-CN": [
+        "优化：设备列表扫描从「每次请求各跑一遍 adb devices」改为并发合并 + 1.5 秒内复用结果。首页、设备页、Excel 页会在同一瞬间各拉一次设备列表，连点刷新也很常见，原先每次都是一次独立扫描——ADB server 抖动时单次最坏要等 2×5 秒超时加 0.5 秒重试间隔，几路并发就是几倍的等待；现在同一时刻只跑一次真实扫描",
+        "修复：后端日志里 uvicorn 的访问日志（GET /api/... 那一行）没有时间戳，和带时间的业务日志混在同一份文件里没法按时间对齐，排查「某个请求到底等了多久」时看不出结论；现已统一为与业务日志一致的格式",
+        "注意：设备列表 1.5 秒内复用上一次的扫描结果，因此刚拔插设备后立刻点刷新，最多 1.5 秒后才反映变化；空结果（ADB 暂时不可用）同样在这 1.5 秒内复用，避免并发请求各自等满超时"
+      ],
+      "en-US": [
+        "Improved: device scanning now collapses concurrent requests and reuses the result for 1.5 seconds. The home, device and Excel pages all fetch the device list at the same instant and repeated refresh clicks are common, but each one used to run its own adb devices — when the ADB server stalls a single scan can take 2x5s of timeout plus a 0.5s retry gap, so N concurrent requests meant N times the wait. Only one real scan now runs at a time",
+        "Fixed: uvicorn access log lines (the GET /api/... ones) carried no timestamp, so they could not be aligned by time with the timestamped business logs in the same file, making \"how long did this request actually wait\" impossible to answer; they now use the same format as business logs",
+        "Note: the device list is reused for 1.5 seconds, so replugging a device and refreshing immediately may take up to 1.5 seconds to show the change; empty results (ADB temporarily unavailable) are cached for the same window, so concurrent requests no longer each wait out the full timeout"
+      ]
+    }
+  },
+  {
+    "version": "1.3.5-指令别名",
+    "date": "2026-09-23",
+    "changes": {
+      "zh-CN": [
+        "新增：用例工作簿可带一张名为 oriStep 的工作表，把常用导航序列起个别名（如 OPENSETTING = HOME/1/5,SETTING/1/1,DOWN/9/1,OK/1/1）。OSDCASE 的 oriStep / preScript 列直接写别名即可，执行前自动展开——改一处导航路径，引用它的所有用例一起生效",
+        "新增：支持逐段混写（OPENSETTING,DOWN/1/1）与别名嵌套（最多 5 层），别名匹配不区分大小写；发现循环引用时保留原文并记告警日志，不会卡死",
+        "变更：Excel 校验与保存用例时的按键合法性检查都改为按展开后的真实按键串判断，因此填写逻辑名不会再被误报为「按键名称无效」；反过来，别名指向的按键串里若有未知键，也会照常报出来",
+        "注意：别名只按当前工作簿里的 oriStep 工作表解析，字典里没有的名字仍按原来的「未知按键 / 命令格式错误」报错，不做兜底；找不到该工作表时功能自动关闭，老用例文件行为不变",
+        "注意：用例编辑弹窗里的「执行步骤」按钮走的是只发裸命令的接口、不带工作簿信息，因此对逻辑名无效（会报未知按键）；把逻辑名存进 Excel 后正常跑用例不受影响"
+      ],
+      "en-US": [
+        "Added: a case workbook may include a worksheet named oriStep that gives a name to a common navigation sequence (e.g. OPENSETTING = HOME/1/5,SETTING/1/1,DOWN/9/1,OK/1/1). Write the alias directly in the OSDCASE oriStep / preScript columns and it is expanded before execution — change the navigation path once and every case that references it follows",
+        "Added: supports mixing an alias with plain commands (OPENSETTING,DOWN/1/1) and nested aliases (up to 5 levels); alias matching is case-insensitive, and a circular reference keeps the original text and logs a warning instead of hanging",
+        "Changed: Excel validation and the save-case key check now judge by the expanded key sequence, so a logical name is no longer falsely reported as an invalid key name; conversely, an unknown key inside an alias expansion is still reported",
+        "Note: aliases are resolved only from the oriStep worksheet of the current workbook, and a name that is not in the dictionary still produces the usual \"unknown key / malformed command\" error with no fallback; the feature switches itself off when that worksheet is absent, leaving older case files unchanged",
+        "Note: the \"execute steps\" button in the case editor posts bare commands without workbook context, so it does not understand logical names (it reports an unknown key); saving the logical name into Excel and running the case normally is unaffected"
+      ]
+    }
+  },
+  {
+    "version": "1.3.4-静音与幻觉识别",
+    "date": "2026-09-16",
+    "changes": {
+      "zh-CN": [
+        "修复：识别结果有时会直接输出 asr_hotwords.txt 里的整张热词表（如 \"Vocabulary: app setting, HOME, Apps, ...\"）——录音是静音时模型会顺着注入的 context 往下续写，把热词提示串当成待识别的文本吐回来",
+        "修复：录音为静音时先判静音并跳过识别，模型根本不会被调用。实测掉采集那条录音 RMS 为 4e-5、正常录音为 2e-2，相差 300 倍，故按 -60 dBFS 一线区分，不会误伤正常录音",
+        "修复：识别结果若被判定为复读热词提示串（整串切段后每段都是热词）同样丢弃，兜住音量偏低但仍被模型幻觉的情况",
+        "变更：识别不可用的段记 NO_REF（无法判定）而非 FAIL，不计入通过率分母——采集或模型故障不该记成设备不达标；不重试，同一份音频重跑结果不变。ASR 校验与 Excel 执行两个模块行为一致",
+        "变更：报告里的 NO_REF 标签由「缺参考」改为「无法判定」，识别文本处显示具体原因（「录音为静音，未捕获到语音」/「识别结果复读了热词提示串」），便于区分是采集没抓到还是模型识别错",
+        "注意：复读判定要求「整串切段后每段都是热词」，因此若某条用例的预期内容本身就是 3 个以上热词组成的裸列表（如只播报 \"Home, Netflix, Apps\"），该次识别会被当作复读丢弃；正常句子里夹带热词不受影响"
+      ]
+    }
+  },
+  {
+    "version": "1.3.3-参考文本优先级",
+    "date": "2026-09-16",
+    "changes": {
+      "zh-CN": [
+        "修复：比对文本的优先级弄反了——原先设备日志抓到的 TTS 输出会盖过你在 Excel 参考列（tvm / TTSTXT）手填的内容，导致填了也没用",
+        "现在规则是：参考列填了内容就以它为准，不管设备日志有没有抓到 TTS；参考列为空才回落到设备日志的 TTS 输出；两者都没有才算 NO_REF",
+        "提示信息同步调整：用参考列比对时会说明「已捕获 TTS 输出，按优先级改用 Excel TTS 参考列比对」，便于区分是主动选择而不是没抓到",
+        "抓到的日志 TTS 仍然照常记录并展示，只是不再参与判定；ASR 与 Excel 执行两个模块行为一致",
+        "注意：Excel 执行模块的判定阈值仍按文本来源区分——参考列 0.9、设备日志 TTS 0.85，未随优先级调整"
+      ]
+    }
+  },
+  {
+    "version": "1.3.2-键值映射删除",
+    "date": "2026-09-16",
+    "changes": {
+      "zh-CN": [
+        "新增：客制化-按键键值映射每行都有删除按钮，继承自系统默认表的按键（OK / HOME / BACK 等）也能删掉了，不再只有自定义行可删",
+        "删除只影响键值映射表本身，合法按键与 sendevent 映射保持原样",
+        "注意：删除系统默认表里的按键会同时让该方案脱离默认表继承（整张表固化为方案自定义），否则下次读取会重新合并默认表、删掉的键又回来；脱离后系统默认表以后新增的按键不会再自动出现在该方案",
+        "优化：原先只对自定义行显示的「↩ 恢复默认」由「× 删除」取代，语义从「还原为默认值」变为「从映射表中移除该按键」"
+      ]
+    }
+  },
+  {
+    "version": "1.3.1-ASR结果回填",
+    "date": "2026-09-16",
+    "changes": {
+      "zh-CN": [
+        "新增：ASR 校验跑完后把该用例的汇总结论回填到测试表格 L 列 testResult，结果不再只留在界面上",
+        "回填规则与界面行级徽标一致：按段通过率判定——分母只算结论明确的 PASS / FAIL 段，缺参考的 NO_REF 段不计入，通过率高于 30% 写 PASS，否则写 FAIL；一个可判定的段都没有时写 NO_REF",
+        "回填失败（如表格被 Excel 独占占用）只记录后端日志，不影响已经跑完的校验；用户中途停止的用例不写回，避免把没跑完的用例记成结论"
+      ]
+    }
+  },
+  {
+    "version": "1.3.0-按键捕获",
+    "date": "2026-09-15",
+    "changes": {
+      "zh-CN": [
+        "新增：客制化页「按键码」区块增加按键捕获面板，点「开始捕获」后按一下遥控器上的键，即自动读出它的 keyname 与 keycode 并保存到当前方案，无需再手工查表填码",
+        "新增：捕获结果同时写入三张表——key_codes（键名→Android keycode）、sendevent_keycode_overrides（Android→Linux 码，取自 scanCode）、监视键映射（source→target，供按键监听纠错）",
+        "新增：捕获时显示每条按键的来源设备名与来源设备节点，多路遥控输入（IR / BT / WiFi / CEC）都能识别",
+        "优化：按键名自动套用脚本词汇别名（如 DPAD_CENTER→OK、VOLUME_UP→VOLUMEUP、TV_INPUT→SOURCE），未收录的保留 Android 原名，保存后仍可在列表中改名",
+        "优化：长按只记一次，不会因为内核自动重复而写入几十条重复映射",
+        "优化：同一时刻收到多个按键时不猜测监听键名，该条留空标灰并提示手填，避免写错映射",
+        "优化：新建方案不再预置默认合法按键（39 个）与默认键值映射（47 条），从空表开始，靠按键捕获 / Excel 导入 / 手工添加补齐，避免新遥控器一上来就继承一张手工维护且已确知有误的旧表",
+        "优化：老方案不受影响，没有该标记的方案仍按原有默认表工作"
+      ]
+    }
+  },
+  {
     "version": "1.2.0-执行引擎增强",
     "date": "2026-06-16",
     "changes": {

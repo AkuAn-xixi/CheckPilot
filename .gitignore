@@ -1,10 +1,11 @@
 # 打包输出文件
+# 注意：AutoDeck.spec 是构建输入而非产物，需要入库；build_exe.bat 依赖它，
+# 忽略掉就会出现「AutoDeck.spec not found」而无法打包。
 dist/
 build/
 *.exe
 *.pkg
 *.pyz
-*.spec
 
 # Python 缓存
 __pycache__/

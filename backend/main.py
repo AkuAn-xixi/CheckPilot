@@ -43,7 +43,7 @@ class _AsyncioConnectionResetFilter(logging.Filter):
 
 logging.getLogger('asyncio').addFilter(_AsyncioConnectionResetFilter())
 logger = logging.getLogger(__name__)
-from .app.api import auth_router, asr_router, customization_router, devices_router, excel_router, execution_router, reports_router
+from .app.api import auth_router, asr_router, customization_router, devices_router, excel_router, execution_router, key_capture_router, reports_router
 from .app.utils.adb_controller import ADBController, KEYCODE_MAP, get_keycode_map
 from .app.services.key_monitor_mapping_service import (
     KeyMonitorMappingError,
@@ -70,6 +70,7 @@ app.include_router(excel_router)
 app.include_router(execution_router)
 app.include_router(asr_router)
 app.include_router(customization_router)
+app.include_router(key_capture_router)
 app.include_router(auth_router)
 app.include_router(reports_router)
 

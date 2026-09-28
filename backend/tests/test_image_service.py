@@ -30,11 +30,22 @@ class FeatureSimilarityTests(unittest.TestCase):
 
 
 class ColorVerifyConfigTests(unittest.TestCase):
+    """颜色三参数的默认值 / 读取 / 回落。
+
+    ``_load_verify_config`` 返回的是完整校验配置（另含引擎选择与 airtest 参数），
+    这里只取颜色三参数做断言，新增键不会影响这些用例。
+    """
+
+    def _color_params(self, cfg: dict) -> dict:
+        return {key: cfg[key] for key in (
+            "color_min_similarity", "color_weight", "feature_min_similarity",
+        )}
+
     def test_returns_defaults_when_no_config(self):
         with mock.patch("backend.app.services.image_service.settings") as mock_settings:
             mock_settings.CUSTOMIZATION_FILE = Path(tempfile.gettempdir()) / "missing_customization.json"
             cfg = _load_verify_config()
-        self.assertEqual(cfg, {
+        self.assertEqual(self._color_params(cfg), {
             "color_min_similarity": 0.4,
             "color_weight": 0.2,
             "feature_min_similarity": 0.3,
@@ -51,7 +62,7 @@ class ColorVerifyConfigTests(unittest.TestCase):
             with mock.patch("backend.app.services.image_service.settings") as mock_settings:
                 mock_settings.CUSTOMIZATION_FILE = cfg_file
                 cfg = _load_verify_config()
-        self.assertEqual(cfg, {
+        self.assertEqual(self._color_params(cfg), {
             "color_min_similarity": 0.6,
             "color_weight": 0.3,
             "feature_min_similarity": 0.5,
@@ -68,7 +79,7 @@ class ColorVerifyConfigTests(unittest.TestCase):
             with mock.patch("backend.app.services.image_service.settings") as mock_settings:
                 mock_settings.CUSTOMIZATION_FILE = cfg_file
                 cfg = _load_verify_config()
-        self.assertEqual(cfg, {
+        self.assertEqual(self._color_params(cfg), {
             "color_min_similarity": 0.4,
             "color_weight": 0.2,
             "feature_min_similarity": 0.3,

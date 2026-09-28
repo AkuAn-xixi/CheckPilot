@@ -162,6 +162,9 @@
                 </tr>
               </thead>
               <tbody>
+                <tr v-if="!sortedKeyCodes.length" class="kc-empty">
+                  <td colspan="4">{{ $t('customization.emptyKeyCodes') }}</td>
+                </tr>
                 <tr
                   v-for="[name, code] in sortedKeyCodes"
                   :key="name"
@@ -188,11 +191,10 @@
                     <template v-if="!editingKey || editingKey !== name">
                       <button class="act-btn" @click="startEdit(name, code)" :title="$t('customization.tooltips.edit')">✎</button>
                       <button
-                        v-if="customOverrides[name] !== undefined"
                         class="act-btn act-del"
-                        @click="deleteOverride(name)"
-                        :title="$t('customization.tooltips.restoreDefault')"
-                      >↩</button>
+                        @click="deleteKeyCode(name)"
+                        :title="$t('customization.tooltips.remove')"
+                      >×</button>
                     </template>
                     <template v-else>
                       <button class="act-btn act-ok" @click="commitEdit(name)" :title="$t('customization.tooltips.confirm')">✓</button>
@@ -204,6 +206,53 @@
             </table>
           </div>
           <p class="key-count">{{ $t('customization.mappingCount', { total: sortedKeyCodes.length, custom: Object.keys(customOverrides).length }) }}</p>
+
+          <div class="capture-panel">
+            <div class="section-header">
+              <div>
+                <h4 class="capture-title">{{ $t('customization.capture.title') }}</h4>
+                <p class="section-desc">{{ $t('customization.capture.desc') }}</p>
+              </div>
+              <div class="section-actions">
+                <button
+                  v-if="!captureRunning"
+                  class="btn btn-primary btn-sm"
+                  @click="startCapture"
+                  :disabled="captureBusy || !selectedScheme"
+                >{{ $t('customization.capture.start') }}</button>
+                <button
+                  v-else
+                  class="btn btn-secondary btn-sm"
+                  @click="stopCapture"
+                  :disabled="captureBusy"
+                >{{ $t('customization.capture.stop') }}</button>
+              </div>
+            </div>
+            <div v-if="captureError" class="status-bar error">{{ captureError }}</div>
+            <div v-else-if="captureRunning" class="status-bar info">
+              {{ $t('customization.capture.capturedCount', { count: captureEvents.length }) }}
+            </div>
+            <ul v-if="captureEvents.length" class="capture-list">
+              <li
+                v-for="item in captureEvents"
+                :key="item.seq"
+                :class="{ 'capture-unpaired': !item.is_paired }"
+              >
+                <span class="capture-device">{{ item.device_name || $t('customization.capture.unknownDevice') }}</span>
+                <span class="capture-name">
+                  {{ item.android_keyname || $t('customization.capture.nameless') }}
+                  <span class="capture-arrow">→</span>
+                  <b>{{ item.script_keyname }}</b>
+                </span>
+                <span class="capture-code">{{ item.android_keycode }}</span>
+                <span v-if="item.linux_scan_code > 0" class="capture-scan">sendevent {{ item.linux_scan_code }}</span>
+                <span class="capture-source">
+                  {{ item.is_paired ? $t('customization.capture.monitorPaired', { source: item.monitor_source_key }) : $t('customization.capture.monitorUnpaired') }}
+                </span>
+              </li>
+            </ul>
+            <p v-if="captureRunning" class="capture-hint">{{ $t('customization.capture.hint') }}</p>
+          </div>
         </section>
         <section class="config-section">
           <div class="section-header">
@@ -326,7 +375,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { showConfirm as confirm } from '../stores/dialogStore'
@@ -676,6 +725,25 @@ const editingCode = ref(0)
 const editingOriginalCode = ref(null)
 let kcTimer = null
 
+// 按键捕获：按一下遥控器就把 keyname → keycode 落盘，省掉手工维护映射表
+const CAPTURE_POLL_MS = 700
+const CAPTURE_SAVE_DEBOUNCE_MS = 1000
+const captureRunning = ref(false)
+const captureBusy = ref(false)
+const captureError = ref('')
+const captureEvents = ref([])
+// 本次会话归属的方案：捕获期间用户可能切走，落盘必须写回开始捕获时那个方案
+let captureScheme = ''
+let captureSince = 0
+let capturePollTimer = null
+let captureSaveTimer = null
+// sendevent 长按用的 Android→Linux 码覆盖表，由捕获补齐
+const sendeventOverrides = ref({})
+// 待落盘的三张表内容，由捕获事件累积，防抖后一次性写
+let pendingKeyCodes = {}
+let pendingSendevent = {}
+let pendingMappings = {}
+
 // 自定义 ADB 命令：按键名 → adb 命令字符串
 const customCommands = ref({})
 const ccNewName = ref('')
@@ -892,7 +960,171 @@ async function saveOverride(name, code) {
   }
 }
 
-async function deleteOverride(name) {
+async function fetchSendeventConfig() {
+  if (!selectedScheme.value) return
+  try {
+    const res = await fetch(schemeEndpoint(selectedScheme.value, '/sendevent-config'))
+    const data = await res.json()
+    sendeventOverrides.value = data.sendevent_keycode_overrides || {}
+  } catch {
+    sendeventOverrides.value = {}
+  }
+}
+
+async function startCapture() {
+  captureBusy.value = true
+  captureError.value = ''
+  try {
+    const res = await fetch('/api/key-capture/start', { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || t('customization.capture.startFailed'))
+    captureEvents.value = []
+    captureScheme = selectedScheme.value
+    captureSince = 0
+    pendingKeyCodes = {}
+    pendingSendevent = {}
+    pendingMappings = {}
+    captureRunning.value = true
+    capturePollTimer = setInterval(pollCaptureEvents, CAPTURE_POLL_MS)
+  } catch (e) {
+    captureError.value = e.message || t('customization.capture.startFailed')
+  } finally {
+    captureBusy.value = false
+  }
+}
+
+async function stopCapture() {
+  captureBusy.value = true
+  clearInterval(capturePollTimer)
+  capturePollTimer = null
+  clearTimeout(captureSaveTimer)
+  captureSaveTimer = null
+  try {
+    await pollCaptureEvents()
+    await flushCaptured()
+    await fetch('/api/key-capture/stop', { method: 'POST' })
+  } catch {
+    // 停止是收尾动作，失败也不该拦住用户，残留会话下次启动会被覆盖
+  } finally {
+    captureRunning.value = false
+    captureBusy.value = false
+    captureScheme = ''
+  }
+}
+
+async function pollCaptureEvents() {
+  try {
+    const res = await fetch(`/api/key-capture/events?since=${captureSince}`)
+    if (!res.ok) throw new Error(t('customization.capture.pollFailed'))
+    const data = await res.json()
+    captureSince = data.latest_seq || captureSince
+    const incoming = data.events || []
+    if (!incoming.length) return
+    captureEvents.value = [...incoming].reverse().concat(captureEvents.value).slice(0, 50)
+    incoming.forEach(collectCaptured)
+    scheduleCaptureSave()
+  } catch (e) {
+    captureError.value = e.message || t('customization.capture.pollFailed')
+  }
+}
+
+function collectCaptured(item) {
+  if (item.has_usable_keycode) {
+    pendingKeyCodes[item.script_keyname] = item.android_keycode
+  }
+  // scanCode 是 Linux 码，正是 sendevent 长按要用的目标；0 表示取不到（多为注入事件）
+  if (item.linux_scan_code > 0) {
+    pendingSendevent[String(item.android_keycode)] = item.linux_scan_code
+  }
+  if (item.is_paired && item.monitor_source_key !== item.script_keyname) {
+    pendingMappings[item.monitor_source_key] = item.script_keyname
+  }
+}
+
+function scheduleCaptureSave() {
+  clearTimeout(captureSaveTimer)
+  captureSaveTimer = setTimeout(() => { flushCaptured() }, CAPTURE_SAVE_DEBOUNCE_MS)
+}
+
+async function flushCaptured() {
+  const scheme = captureScheme
+  if (!scheme) return
+  await flushKeyCodes(scheme)
+  await flushSendevent(scheme)
+  await flushMappings()
+}
+
+// 三个既有写接口都是「整体替换」语义，所以每次都要带上已在界面上的旧值
+async function flushKeyCodes(scheme) {
+  if (!Object.keys(pendingKeyCodes).length) return
+  const body = { key_codes: { ...customOverrides.value, ...pendingKeyCodes } }
+  pendingKeyCodes = {}
+  try {
+    const data = await putCaptureJson(schemeEndpoint(scheme, '/key-codes'), body)
+    keyCodes.value = data.key_codes
+    customOverrides.value = data.custom_overrides
+  } catch (e) {
+    captureError.value = e.message
+  }
+}
+
+async function flushSendevent(scheme) {
+  if (!Object.keys(pendingSendevent).length) return
+  const merged = { ...sendeventOverrides.value, ...pendingSendevent }
+  pendingSendevent = {}
+  try {
+    const data = await putCaptureJson(schemeEndpoint(scheme, '/sendevent-config'), {
+      sendevent_keycode_overrides: merged
+    })
+    sendeventOverrides.value = data.sendevent_keycode_overrides || merged
+  } catch (e) {
+    captureError.value = e.message
+  }
+}
+
+async function flushMappings() {
+  for (const [sourceKey, targetKey] of Object.entries(pendingMappings)) {
+    delete pendingMappings[sourceKey]
+    try {
+      await postCaptureMapping(sourceKey, targetKey)
+    } catch (e) {
+      captureError.value = e.message
+    }
+  }
+}
+
+function schemeEndpoint(scheme, suffix) {
+  return `/api/customization/schemes/${encodeURIComponent(scheme)}${suffix}`
+}
+
+async function putCaptureJson(url, body) {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    throw new Error(e.detail || t('customization.status.saveFailed'))
+  }
+  return res.json()
+}
+
+async function postCaptureMapping(sourceKey, targetKey) {
+  const res = await fetch('/api/keymonitor/mappings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_key: sourceKey, target_key: targetKey })
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data.success === false) {
+    throw new Error(data.message || data.detail || t('customization.capture.mappingFailed'))
+  }
+}
+
+// 删除按键在方案键值映射中的记录；删继承来的默认键时后端会一并脱离继承，
+// 返回的 custom_overrides 会变成固化后的整张表，前端照单刷新即可
+async function deleteKeyCode(name) {
   kcLoading.value = true
   try {
     const res = await fetch(
@@ -906,7 +1138,7 @@ async function deleteOverride(name) {
     const data = await res.json()
     keyCodes.value = data.key_codes
     customOverrides.value = data.custom_overrides
-    showKcStatus(t('customization.status.restoredDefaultKeyCode', { name }))
+    showKcStatus(t('customization.status.keyCodeDeleted', { name }))
   } catch (e) {
     showKcStatus(e.message || t('customization.status.deleteFailed'), 'error')
   } finally {
@@ -944,14 +1176,22 @@ watch(selectedScheme, (name) => {
   editingOriginalCode.value = null
   ccNewName.value = ''
   ccNewCommand.value = ''
+  stopCapture()
+  captureEvents.value = []
+  captureError.value = ''
   fetchKeys()
   fetchKeyCodes()
   fetchCustomCommands()
+  fetchSendeventConfig()
 })
 
 onMounted(async () => {
   await fetchSchemes()
   await fetchExtraDelay()
+})
+
+onUnmounted(() => {
+  stopCapture()
 })
 
 onBeforeRouteLeave(async (to, from, next) => {
@@ -1042,6 +1282,30 @@ onBeforeRouteLeave(async (to, from, next) => {
 .tag-remove { background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 1rem; line-height: 1; padding: 0 2px; }
 .tag-remove:hover { color: #ef4444; }
 .key-count { margin-top: 10px; font-size: 0.78rem; color: #9ca3af; }
+.capture-panel {
+  margin-top: 14px; padding: 14px 16px 12px;
+  background: rgba(248,250,252,0.85); border: 1px dashed #cbd5e1; border-radius: 14px;
+}
+.capture-title { font-size: 0.9rem; font-weight: 600; margin: 0 0 4px; }
+.capture-panel .section-header { margin-bottom: 10px; }
+.capture-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.capture-list li {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+  font-size: 0.8rem;
+}
+.capture-unpaired { opacity: 0.62; border-style: dashed !important; }
+.capture-device { color: #64748b; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capture-name { font-family: 'Courier New', monospace; color: #1e293b; }
+.capture-arrow { color: #94a3b8; margin: 0 2px; }
+.capture-code {
+  font-family: 'Courier New', monospace;
+  background: rgba(238,242,255,0.9); color: #4338ca;
+  border-radius: 6px; padding: 1px 8px;
+}
+.capture-scan { font-family: 'Courier New', monospace; font-size: 0.75rem; color: #0891b2; }
+.capture-source { margin-left: auto; font-size: 0.75rem; color: #6b7280; }
+.capture-hint { margin: 10px 0 0; font-size: 0.78rem; color: #9ca3af; }
 .kc-table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(226,232,240,0.8); }
 .kc-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
 .kc-table th {
@@ -1060,6 +1324,7 @@ onBeforeRouteLeave(async (to, from, next) => {
   border-radius: 6px; padding: 1px 8px; font-size: 0.82rem;
 }
 .kc-edit-input { width: 90px !important; padding: 4px 8px !important; font-size: 0.82rem !important; border-radius: 8px !important; }
+.kc-empty td { padding: 18px 14px; text-align: center; color: #9ca3af; font-size: 0.8rem; }
 .cc-command-input { flex: 1.6; min-width: 200px; font-family: 'Courier New', monospace; }
 .cc-command { font-family: 'Courier New', monospace; font-size: 0.78rem; color: #475569; word-break: break-all; }
 .badge-custom { display: inline-block; padding: 1px 8px; background: #eef2ff; color: #4f46e5; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }

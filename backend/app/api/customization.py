@@ -9,6 +9,17 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Tuple
 
 from ..config import settings
+from ..models.verify_config import (
+    DEFAULT_AIRTEXT_THRESHOLD,
+    DEFAULT_COLOR_MIN_SIMILARITY,
+    DEFAULT_COLOR_WEIGHT,
+    DEFAULT_FEATURE_MIN_SIMILARITY,
+    normalize_airtest_rgb,
+    normalize_airtest_strategy,
+    normalize_engine,
+    normalize_unit_interval,
+    normalize_verify_config,
+)
 from ..utils.adb_controller import KEYCODE_MAP
 
 router = APIRouter(prefix="/api/customization", tags=["customization"])
@@ -23,6 +34,69 @@ DEFAULT_VALID_KEYS: List[str] = sorted([
     'VOLUMEDOWN', 'NETFLIX', 'YOUTUBE', 'PRIME_VIDEO', 'ACTION3', 'APPS',
     'FILES', 'MUTE', 'DISCOVERY', 'ASSERT', 'NOTASSERT',
 ])
+
+# 方案标记：显式写成 False 表示该方案不继承内置的默认按键表与默认键值表（KEYCODE_MAP），
+# 一切以配置里写的内容为准。新建方案即为此形态——默认表里有大量手工维护且已确知有误的
+# 条目（如 CHUP:82 撞 MENU、YELLOW:3 撞 HOME），新遥控器应当从空表开始，靠按键捕获
+# /Excel 导入/手工添加逐步补齐，而不是先继承一堆错值。
+# 老方案没有这个键，一律视为继承，行为与加入本标记之前完全一致。
+INHERIT_DEFAULTS_FIELD = "inherit_defaults"
+
+
+def _inherits_defaults(scheme: dict) -> bool:
+    """判断方案是否继承内置默认表；只有显式关掉才不继承。"""
+    return scheme.get(INHERIT_DEFAULTS_FIELD) is not False
+
+
+def _effective_valid_keys(scheme: dict) -> List[str]:
+    """方案实际生效的合法按键：显式配置优先，否则按是否继承默认表取默认列表或空表。"""
+    explicit = scheme.get("valid_keys")
+    if isinstance(explicit, list) and explicit:
+        return sorted(explicit)
+    return list(DEFAULT_VALID_KEYS) if _inherits_defaults(scheme) else []
+
+
+def _merged_key_codes(scheme: dict) -> Dict[str, int]:
+    """方案实际生效的键值映射：继承默认表的方案以 KEYCODE_MAP 为底再叠加自定义条目。"""
+    custom = {str(k).upper(): v for k, v in (scheme.get("key_codes") or {}).items()}
+    if not _inherits_defaults(scheme):
+        return dict(sorted(custom.items()))
+    return dict(sorted({**KEYCODE_MAP, **custom}.items()))
+
+
+def _remove_key_code_override(scheme: dict, key: str) -> None:
+    """摘掉方案里某个按键的自定义覆盖，不改动继承关系。"""
+    custom = {str(k).upper(): v for k, v in (scheme.get("key_codes") or {}).items()}
+    custom.pop(key, None)
+    scheme["key_codes"] = custom
+
+
+def _detach_from_defaults(scheme: dict, key: str) -> None:
+    """固化当前生效的键值表（去掉 key）并让方案不再继承内置默认表。
+
+    删除一条继承自 KEYCODE_MAP 的按键时调用：不固化的话，方案的 ``key_codes``
+    里没有它，下次读取又会把默认表整体合并回来，被删的键就"复活"了。
+    """
+    merged = _merged_key_codes(scheme)
+    merged.pop(key, None)
+    scheme["key_codes"] = merged
+    scheme[INHERIT_DEFAULTS_FIELD] = False
+
+
+def _seed_valid_keys(scheme: dict, extra_keys: set) -> None:
+    """把按键名并入方案的合法按键。
+
+    方案尚无显式列表时，种子取 :func:`_effective_valid_keys` 的结果——继承默认表的方案
+    拿到默认列表（避免 Excel 回放时被判「按键无效」而跳过），不继承的方案则从空表开始，
+    只留下真正录入过的按键。
+    """
+    existing = scheme.get("valid_keys")
+    if isinstance(existing, list) and existing:
+        merged = {str(k).strip().upper() for k in existing if isinstance(k, str) and k.strip()}
+    else:
+        merged = set(_effective_valid_keys(scheme))
+    merged.update(extra_keys)
+    scheme["valid_keys"] = sorted(merged)
 
 
 # ─── 请求体模型 ────────────────────────────────────────────────────────────────
@@ -63,36 +137,19 @@ def _normalize_extra_delay(value) -> float:
     return delay
 
 
-DEFAULT_COLOR_MIN_SIMILARITY = 0.4
-DEFAULT_COLOR_WEIGHT = 0.2
-DEFAULT_FEATURE_MIN_SIMILARITY = 0.3
-
-
 def _normalize_color_threshold(value) -> float:
-    """把任意输入归一化为 0~1 的颜色相似度下限；非法值回落到默认 0.4。"""
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_COLOR_MIN_SIMILARITY
-    return parsed if 0.0 <= parsed <= 1.0 else DEFAULT_COLOR_MIN_SIMILARITY
+    """把任意输入归一化为 0~1 的颜色相似度下限；非法值回落到默认值。"""
+    return normalize_unit_interval(value, DEFAULT_COLOR_MIN_SIMILARITY)
 
 
 def _normalize_color_weight(value) -> float:
-    """把任意输入归一化为 0~1 的颜色权重；非法值回落到默认 0.2。"""
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_COLOR_WEIGHT
-    return parsed if 0.0 <= parsed <= 1.0 else DEFAULT_COLOR_WEIGHT
+    """把任意输入归一化为 0~1 的颜色权重；非法值回落到默认值。"""
+    return normalize_unit_interval(value, DEFAULT_COLOR_WEIGHT)
 
 
 def _normalize_feature_threshold(value) -> float:
-    """把任意输入归一化为 0~1 的特征相似度下限；非法值回落到默认 0.3。"""
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_FEATURE_MIN_SIMILARITY
-    return parsed if 0.0 <= parsed <= 1.0 else DEFAULT_FEATURE_MIN_SIMILARITY
+    """把任意输入归一化为 0~1 的特征相似度下限；非法值回落到默认值。"""
+    return normalize_unit_interval(value, DEFAULT_FEATURE_MIN_SIMILARITY)
 
 
 def _normalize_config(data: dict) -> dict:
@@ -113,15 +170,20 @@ def _normalize_config(data: dict) -> dict:
     if not isinstance(active_scheme, str) or active_scheme not in normalized_schemes:
         active_scheme = DEFAULT_SCHEME_NAME
 
+    verify_config = normalize_verify_config(data)
     return {
         "active_scheme": active_scheme,
         "schemes": normalized_schemes,
         # 全局：每条命令在用户指定 delay 之上再额外等待的秒数。0 表示不变。
         "extra_command_delay": _normalize_extra_delay(data.get("extra_command_delay")),
-        # 全局：图片校验参数（颜色相似度下限 / 最终分颜色权重 / 特征相似度下限）。
-        "color_min_similarity": _normalize_color_threshold(data.get("color_min_similarity")),
-        "color_weight": _normalize_color_weight(data.get("color_weight")),
-        "feature_min_similarity": _normalize_feature_threshold(data.get("feature_min_similarity")),
+        # 全局：图片校验参数。这里是 schema 权威，新键不写进来会被静默丢弃。
+        "verify_engine": verify_config.verify_engine,
+        "color_min_similarity": verify_config.color_min_similarity,
+        "color_weight": verify_config.color_weight,
+        "feature_min_similarity": verify_config.feature_min_similarity,
+        "airtest_threshold": verify_config.airtest_threshold,
+        "airtest_rgb": verify_config.airtest_rgb,
+        "airtest_strategy": verify_config.airtest_strategy,
     }
 
 def _load_config() -> dict:
@@ -181,7 +243,6 @@ def get_feature_min_similarity() -> float:
     cfg = _load_config()
     return _normalize_feature_threshold(cfg.get("feature_min_similarity"))
 
-
 # ─── 全局命令延迟增量 ──────────────────────────────────────────────────────────
 
 
@@ -239,6 +300,50 @@ def update_color_verify_config_route(req: ColorVerifyConfigUpdateRequest):
     }
 
 
+# ─── 图片校验引擎配置（全局开关） ─────────────────────────────────────────────
+
+def _normalize_airtest_threshold(value) -> float:
+    """把任意输入归一化为 0~1 的 airtest 置信度阈值；非法值回落到默认值。"""
+    return normalize_unit_interval(value, DEFAULT_AIRTEXT_THRESHOLD)
+
+
+# 字段名 → 归一化函数。键即 PUT 请求可更新的全部字段，避免两处各列一遍。
+_VERIFY_ENGINE_NORMALIZERS = {
+    "verify_engine": normalize_engine,
+    "airtest_threshold": _normalize_airtest_threshold,
+    "airtest_rgb": normalize_airtest_rgb,
+    "airtest_strategy": normalize_airtest_strategy,
+}
+_VERIFY_ENGINE_KEYS = tuple(_VERIFY_ENGINE_NORMALIZERS)
+
+
+class VerifyEngineConfigUpdateRequest(BaseModel):
+    verify_engine: Optional[str] = None
+    airtest_threshold: Optional[float] = None
+    airtest_rgb: Optional[bool] = None
+    airtest_strategy: Optional[str] = None
+
+
+@router.get("/verify-engine-config")
+def get_verify_engine_config_route():
+    """获取图片校验的引擎选择与 airtest 参数（全局生效，与颜色参数同存一份配置）。"""
+    config = _load_config()
+    return {
+        key: _VERIFY_ENGINE_NORMALIZERS[key](config.get(key))
+        for key in _VERIFY_ENGINE_KEYS
+    }
+
+
+@router.put("/verify-engine-config")
+def update_verify_engine_config_route(req: VerifyEngineConfigUpdateRequest):
+    """更新图片校验的引擎选择与 airtest 参数（可只更新其中若干项）。"""
+    config = _load_config()
+    for key, value in req.model_dump(exclude_none=True).items():
+        config[key] = _VERIFY_ENGINE_NORMALIZERS[key](value)
+    _save_config(config)
+    return get_verify_engine_config_route()
+
+
 def _require_scheme(config: dict, name: str) -> dict:
     scheme = config.get("schemes", {}).get(name)
     if scheme is None:
@@ -260,7 +365,7 @@ def list_schemes():
             {
                 "name": name,
                 "is_active": name == active,
-                "valid_keys_count": len(s.get("valid_keys") or DEFAULT_VALID_KEYS),
+                "valid_keys_count": len(_effective_valid_keys(s)),
                 "key_codes_count": len(s.get("key_codes", {})),
                 "custom_commands_count": len(s.get("custom_commands", {})),
             }
@@ -271,14 +376,14 @@ def list_schemes():
 
 @router.post("/schemes")
 def create_scheme(req: CreateSchemeRequest):
-    """新建方案（空方案，使用默认按键与键值）"""
+    """新建方案（空方案，不继承默认按键表与默认键值，靠捕获/导入/手填补齐）"""
     name = req.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="方案名称不能为空")
     config = _load_config()
     if name in config.get("schemes", {}):
         raise HTTPException(status_code=409, detail=f"方案 '{name}' 已存在")
-    config.setdefault("schemes", {})[name] = {}
+    config.setdefault("schemes", {})[name] = {INHERIT_DEFAULTS_FIELD: False}
     if not config.get("active_scheme") or config["active_scheme"] not in config["schemes"]:
         config["active_scheme"] = name
     _save_config(config)
@@ -333,9 +438,8 @@ def get_valid_keys(scheme_name: str):
     config = _load_config()
     scheme = _require_scheme(config, scheme_name)
     custom = scheme.get("valid_keys")
-    if isinstance(custom, list) and custom:
-        return {"keys": sorted(custom), "is_custom": True}
-    return {"keys": DEFAULT_VALID_KEYS, "is_custom": False}
+    is_custom = isinstance(custom, list) and bool(custom)
+    return {"keys": _effective_valid_keys(scheme), "is_custom": is_custom}
 
 
 @router.put("/schemes/{scheme_name}/valid-keys")
@@ -353,10 +457,10 @@ def update_valid_keys(scheme_name: str, req: ValidKeysUpdateRequest):
 @router.post("/schemes/{scheme_name}/valid-keys/reset")
 def reset_valid_keys(scheme_name: str):
     config = _load_config()
-    _require_scheme(config, scheme_name)
-    config["schemes"][scheme_name].pop("valid_keys", None)
+    scheme = _require_scheme(config, scheme_name)
+    scheme.pop("valid_keys", None)
     _save_config(config)
-    return {"keys": DEFAULT_VALID_KEYS}
+    return {"keys": _effective_valid_keys(scheme)}
 
 
 # ─── 键值映射 ──────────────────────────────────────────────────────────────────
@@ -365,10 +469,9 @@ def reset_valid_keys(scheme_name: str):
 def get_key_codes(scheme_name: str):
     config = _load_config()
     scheme = _require_scheme(config, scheme_name)
-    custom = {k.upper(): v for k, v in scheme.get("key_codes", {}).items()}
-    merged = {**KEYCODE_MAP, **custom}
+    custom = {str(k).upper(): v for k, v in (scheme.get("key_codes") or {}).items()}
     return {
-        "key_codes": dict(sorted(merged.items())),
+        "key_codes": _merged_key_codes(scheme),
         "custom_overrides": dict(sorted(custom.items())),
     }
 
@@ -386,53 +489,47 @@ def update_key_codes(scheme_name: str, req: KeyCodesUpdateRequest):
     config = _load_config()
     scheme = _require_scheme(config, scheme_name)
     scheme["key_codes"] = validated
-
-    existing_valid_keys = scheme.get("valid_keys")
-    if isinstance(existing_valid_keys, list) and existing_valid_keys:
-        merged_valid_keys = {
-            str(key).strip().upper()
-            for key in existing_valid_keys
-            if isinstance(key, str) and key.strip()
-        }
-    else:
-        merged_valid_keys = set(DEFAULT_VALID_KEYS)
-    merged_valid_keys.update(validated.keys())
-    scheme["valid_keys"] = sorted(merged_valid_keys)
-
+    _seed_valid_keys(scheme, set(validated.keys()))
     _save_config(config)
-    merged = {**KEYCODE_MAP, **validated}
     return {
-        "key_codes": dict(sorted(merged.items())),
+        "key_codes": _merged_key_codes(scheme),
         "custom_overrides": dict(sorted(validated.items())),
     }
 
 
 @router.delete("/schemes/{scheme_name}/key-codes/{key_name}")
 def delete_key_code(scheme_name: str, key_name: str):
+    """删除按键在该方案键值映射中的记录。
+
+    继承默认表的方案里，被删的键可能来自 KEYCODE_MAP 而非自定义覆盖，
+    此时一并脱离继承，否则下次读取会把默认表重新合并回来。删除只影响键值映射，
+    合法按键与 sendevent 映射保持原样。
+    """
     config = _load_config()
-    _require_scheme(config, scheme_name)
+    scheme = _require_scheme(config, scheme_name)
     key = key_name.strip().upper()
-    overrides = config["schemes"][scheme_name].get("key_codes", {})
-    if key not in overrides:
-        raise HTTPException(status_code=404, detail=f"'{key}' 不是自定义键值")
-    del overrides[key]
-    config["schemes"][scheme_name]["key_codes"] = overrides
+    if key not in _merged_key_codes(scheme):
+        raise HTTPException(status_code=404, detail=f"'{key}' 不在当前键值映射中")
+
+    if key in KEYCODE_MAP and _inherits_defaults(scheme):
+        _detach_from_defaults(scheme, key)
+    else:
+        _remove_key_code_override(scheme, key)
     _save_config(config)
-    merged = {**KEYCODE_MAP, **overrides}
     return {
-        "key_codes": dict(sorted(merged.items())),
-        "custom_overrides": dict(sorted(overrides.items())),
+        "key_codes": _merged_key_codes(scheme),
+        "custom_overrides": dict(sorted((scheme.get("key_codes") or {}).items())),
     }
 
 
 @router.post("/schemes/{scheme_name}/key-codes/reset")
 def reset_key_codes(scheme_name: str):
     config = _load_config()
-    _require_scheme(config, scheme_name)
-    config["schemes"][scheme_name].pop("key_codes", None)
+    scheme = _require_scheme(config, scheme_name)
+    scheme.pop("key_codes", None)
     _save_config(config)
     return {
-        "key_codes": dict(sorted(KEYCODE_MAP.items())),
+        "key_codes": _merged_key_codes(scheme),
         "custom_overrides": {},
     }
 
@@ -454,8 +551,14 @@ async def delete_key_code_override(key_name: str):
 
 
 @router.post("/key-codes/reset")
-async def reset_key_codes():
-    """清除所有自定义键值覆盖，还原为全部默认值"""
+async def reset_legacy_key_codes():
+    """清除顶层扁平配置里的自定义键值覆盖（旧接口，保留兼容）。
+
+    TODO: 该接口读写的是配置顶层的 ``key_codes``，而 ``_normalize_config`` 落盘时只保留
+    ``active_scheme``/``schemes`` 与几个全局项，所以这里写下去的内容下次读取即被丢弃，
+    实际上是个空操作。此处只加前缀避免与方案版 ``reset_key_codes`` 同名互相覆盖
+    （同名会让模块属性指向本函数，方案版从此无法被直接引用）。是否下线待确认。
+    """
     cfg = _load_config()
     cfg.pop("key_codes", None)
     _save_config(cfg)
@@ -485,13 +588,7 @@ def _normalize_custom_commands(commands: Dict[str, str]) -> Dict[str, str]:
 
 def _merge_commands_into_valid_keys(scheme: dict, command_keys: set) -> None:
     """把自定义命令按键名并入方案合法按键，避免 Excel 校验/回放时被当作无效按键。"""
-    existing = scheme.get("valid_keys")
-    if isinstance(existing, list) and existing:
-        merged = {str(k).strip().upper() for k in existing if isinstance(k, str) and k.strip()}
-    else:
-        merged = set(DEFAULT_VALID_KEYS)
-    merged.update(command_keys)
-    scheme["valid_keys"] = sorted(merged)
+    _seed_valid_keys(scheme, command_keys)
 
 
 @router.get("/schemes/{scheme_name}/custom-commands")
@@ -853,7 +950,7 @@ async def import_scheme_from_excel(
             {
                 "name": name,
                 "is_active": name == config.get("active_scheme"),
-                "valid_keys_count": len(s.get("valid_keys") or DEFAULT_VALID_KEYS),
+                "valid_keys_count": len(_effective_valid_keys(s)),
                 "key_codes_count": len(s.get("key_codes", {})),
             }
             for name, s in sorted(schemes.items())

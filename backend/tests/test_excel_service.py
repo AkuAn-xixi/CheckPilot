@@ -429,5 +429,40 @@ class CustomizedKeyExecutionTests(unittest.TestCase):
         self.assertIn('ZEPHYR', scheme['valid_keys'])
 
 
+class CheckInvalidKeysTests(unittest.TestCase):
+    @mock.patch('backend.app.services.excel_service.get_keycode_map', return_value={'HOME': 3})
+    @mock.patch('backend.app.services.excel_service.get_runtime_valid_keys', return_value={'HOME'})
+    def test_alias_is_validated_as_its_expansion(self, _mock_valid_keys, _mock_keycodes):
+        invalid = ExcelService._check_invalid_keys(
+            'OPENSETTING', '', {'OPENSETTING': 'HOME/1/1'}
+        )
+
+        self.assertEqual(invalid, [])
+
+    @mock.patch(
+        'backend.app.services.excel_service.get_keycode_map',
+        return_value={'HOME': 3, 'DOWN': 20},
+    )
+    @mock.patch(
+        'backend.app.services.excel_service.get_runtime_valid_keys',
+        return_value={'HOME', 'DOWN'},
+    )
+    def test_alias_mixed_with_plain_commands_is_checked(self, _mock_valid_keys, _mock_keycodes):
+        invalid = ExcelService._check_invalid_keys(
+            'OPENSETTING,DOWN/1/1', '', {'OPENSETTING': 'HOME/1/1'}
+        )
+
+        self.assertEqual(invalid, [])
+
+    @mock.patch('backend.app.services.excel_service.get_keycode_map', return_value={'HOME': 3})
+    @mock.patch('backend.app.services.excel_service.get_runtime_valid_keys', return_value={'HOME'})
+    def test_unknown_key_inside_alias_is_reported(self, _mock_valid_keys, _mock_keycodes):
+        invalid = ExcelService._check_invalid_keys(
+            'OPENBAD', '', {'OPENBAD': 'NOTAKEY/1/1'}
+        )
+
+        self.assertEqual(invalid, [{'key': 'NOTAKEY', 'reason': 'invalid'}])
+
+
 if __name__ == '__main__':
     unittest.main()

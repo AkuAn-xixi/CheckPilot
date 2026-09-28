@@ -96,6 +96,45 @@ class ResolveVerifyVerdictTests(unittest.TestCase):
         self.assertFalse(execution.resolve_verify_verdict(matched=True, expect_no_match=True))
 
 
+class BuildCompareDetailsTests(unittest.TestCase):
+    """比对明细是白名单：新键不加进去就到不了 SSE 与报告。"""
+
+    def test_keeps_airtest_engine_keys(self):
+        details = execution.build_compare_details({
+            "score": 0.97,
+            "engine": "airtest",
+            "confidence": 0.97,
+            "match_rect_x": 120,
+            "match_rect_y": 340,
+            "match_rect_w": 200,
+            "match_rect_h": 60,
+            "match_target_x": 220,
+            "match_target_y": 370,
+            "rgb_used": False,
+        })
+
+        self.assertEqual(details["engine"], "airtest")
+        self.assertEqual(details["match_rect_x"], 120)
+        self.assertEqual(details["match_target_y"], 370)
+        # False 是有效值（灰度匹配），不能被当成空值丢掉
+        self.assertIn("rgb_used", details)
+
+    def test_keeps_opencv_engine_keys(self):
+        details = execution.build_compare_details({
+            "score": 0.95,
+            "template_score": 0.96,
+            "color_score": 0.9,
+        })
+
+        self.assertEqual(details["template_score"], 0.96)
+        self.assertNotIn("engine", details)
+
+    def test_drops_missing_and_empty_values(self):
+        details = execution.build_compare_details({"score": 0.5, "color_score": None, "dino_score": ""})
+
+        self.assertEqual(details, {"score": 0.5})
+
+
 class NotAssertInvertedVerificationTests(unittest.IsolatedAsyncioTestCase):
     """NOTASSERT 反向断言：图片不匹配 → PASS，图片匹配 → FAIL。"""
 

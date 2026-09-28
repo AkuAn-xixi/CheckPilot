@@ -15,6 +15,7 @@ from ..utils.adb_controller import KEYCODE_MAP, NON_EXECUTABLE_KEYS, apply_min_c
 from ..utils.path_resolver import resolve_excel_file, resolve_image_file
 from ..services.image_service import (
     format_score_breakdown,
+    get_active_engine_name,
     verify_image_base64_match,
     verify_image_match,
 )
@@ -27,6 +28,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/excel", tags=["execution"])
 WAIT_KEEPALIVE_INTERVAL = 15.0
+# 比对文本来源，取值与 asr.py、前端 getComparisonSourceLabel 保持一致
+COMPARISON_SOURCE_REFERENCE = "reference"
+COMPARISON_SOURCE_TTS = "tts"
+# 来源 → 判定阈值：比对文本来自设备日志时等同原句，来自 Excel 参考列时容忍度略低
+COMPARISON_SOURCE_THRESHOLDS = {
+    COMPARISON_SOURCE_TTS: 0.85,
+    COMPARISON_SOURCE_REFERENCE: 0.9,
+}
 
 
 class ExecutionStopped(Exception):
@@ -49,6 +58,11 @@ def get_valid_row(valid_rows: list, row_index: int) -> dict:
 
 
 def build_compare_details(result: dict) -> dict:
+    """从校验结果里挑出要进比对明细的键。
+
+    这里是白名单：新键不写进来，SSE 事件与报告都拿不到。airtest 引擎的匹配坐标
+    必须是扁平标量，报告端 ``_normalize_compare_details`` 会丢掉元组与嵌套数组。
+    """
     detail_keys = (
         "score",
         "template_score",
@@ -57,6 +71,16 @@ def build_compare_details(result: dict) -> dict:
         "color_score",
         "dino_score",
         "aspect_ratio_score",
+        # airtest 引擎专有：引擎名、置信度（= score）、匹配矩形与中心点、是否比色
+        "engine",
+        "confidence",
+        "match_rect_x",
+        "match_rect_y",
+        "match_rect_w",
+        "match_rect_h",
+        "match_target_x",
+        "match_target_y",
+        "rgb_used",
     )
     details = {}
     for key in detail_keys:
@@ -472,14 +496,19 @@ async def execute_commands_stream(
             audio_path = asr_service.save_audio_recording(recorder, f"{case_title}_k{tts_index}")
             asr_service.enhance_audio(audio_path)
             asr_service.reduce_noise(audio_path)
-            asr_service.adjust_speed(audio_path, speed=0.9)
-            transcript = asr_service.transcribe_audio(audio_path)
+            outcome = asr_service.transcribe_audio(audio_path)
+            transcript = outcome.text
             transcript_path = asr_service.save_transcript(audio_path, transcript)
 
-            # 比对：优先 Excel M 列 TTSTXT，其次 TTS 日志文本
+            # 比对：Excel 参考列只要有手填内容就以它为准，设备日志抓到的 TTS
+            # 输出仅在参考列为空时兜底
             reference_text = executed_row.get("tts_text", "") or ""
-            comparison_text = reference_text or tts_text
-            comparison_source = "reference" if reference_text else "tts"
+            if reference_text:
+                comparison_text = reference_text
+                comparison_source = COMPARISON_SOURCE_REFERENCE
+            else:
+                comparison_text = tts_text
+                comparison_source = COMPARISON_SOURCE_TTS
 
             if not comparison_text:
                 record = {
@@ -499,7 +528,28 @@ async def execute_commands_stream(
                 })
                 return
 
-            threshold = 0.85 if comparison_source == "tts" else 0.9
+            # 识别不可用（静音/复读热词）→ NO_REF：采集或模型故障不该记成设备不达标
+            if not outcome.is_available:
+                record = {
+                    'tts_index': tts_index,
+                    'trigger_command': trigger_command,
+                    'verify_result': 'NO_REF',
+                    'score': None,
+                    'tts_text': tts_text,
+                    'transcribed_text': outcome.unavailable_reason,
+                    'reference_text': comparison_text,
+                    'comparison_source': comparison_source,
+                    'audio_path': str(audio_path),
+                }
+                tts_results.append(record)
+                yield format_sse({
+                    'status': 'error',
+                    'message': f'TTS #{tts_index + 1}: {outcome.unavailable_reason}，无法判定',
+                    **record,
+                })
+                return
+
+            threshold = COMPARISON_SOURCE_THRESHOLDS[comparison_source]
             comparison = asr_service.compare_transcript(transcript, comparison_text, threshold=threshold)
             asr_service.save_compare_report(audio_path, transcript, comparison_text, comparison)
 
@@ -583,7 +633,7 @@ async def execute_commands_stream(
                 'verify_result': 'ERROR',
                 'score': 0.0,
                 'message': '截图失败',
-                'compare_engine': 'opencv',
+                'compare_engine': get_active_engine_name(),
                 'model_name': '',
             }
             assert_results.append(record)
@@ -605,7 +655,7 @@ async def execute_commands_stream(
                 'verify_result': 'ERROR',
                 'score': 0.0,
                 'message': f'第 {assert_index + 1} 次校验缺少对应的 checkPic 图片',
-                'compare_engine': 'opencv',
+                'compare_engine': get_active_engine_name(),
                 'model_name': '',
             }
             assert_results.append(record)
@@ -621,7 +671,7 @@ async def execute_commands_stream(
                 'verify_result': 'ERROR',
                 'score': 0.0,
                 'message': f'校验图片未在本地文件夹中找到: {target_image}',
-                'compare_engine': 'opencv',
+                'compare_engine': get_active_engine_name(),
                 'model_name': '',
             }
             assert_results.append(record)

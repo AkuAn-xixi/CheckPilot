@@ -14,6 +14,7 @@ from backend.app.utils.adb_controller import (
     ADBController,
     SENDEVENT_LONG_PRESS_DEFAULT_TIMEOUT_US,
     SENDEVENT_LONG_PRESS_MARGIN_US,
+    _flatten_grouped_commands,
     _parse_repeat_count,
     _strip_adb_prefix_tokens,
     get_custom_commands,
@@ -119,6 +120,125 @@ class ReadExcelCommandsTests(unittest.TestCase):
 
         self.assertEqual(result["commands"], ["OK(250000)/1/100"])
         self.assertEqual(len(result["valid_rows"]), 2)
+
+    @mock.patch("backend.app.utils.adb_controller.load_command_aliases")
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_expands_aliases_before_validation(
+        self, mock_read_excel, mock_load_aliases
+    ):
+        # 只写逻辑名的行必须被判为有效：否则整行会被 skipped_rows 丢弃，
+        # 前端两个页面都看不到这条用例
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "OPENSETTING", "preScript": "", "testID": "TC-ALIAS"},
+        ])
+        mock_load_aliases.return_value = {
+            "OPENSETTING": "HOME/1/5,SETTING/1/1,DOWN/9/1,OK/1/1"
+        }
+
+        result = self.controller.read_excel_commands("alias.xlsx", target_row=1)
+
+        self.assertEqual(
+            result["commands"], ["HOME/1/5", "SETTING/1/1", "DOWN/9/1", "OK/1/1"]
+        )
+        self.assertEqual(result["skipped_rows"], [])
+        self.assertEqual(len(result["valid_rows"]), 1)
+        # 原始逻辑名保持不覆盖，前端编辑框与写回 Excel 仍是别名
+        self.assertEqual(result["valid_rows"][0]["oriStep"], "OPENSETTING")
+
+    @mock.patch("backend.app.utils.adb_controller.load_command_aliases")
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_expands_alias_mixed_with_plain_commands(
+        self, mock_read_excel, mock_load_aliases
+    ):
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "OPENSETTING,OK/1/1", "preScript": "", "testID": "TC-MIX"},
+        ])
+        mock_load_aliases.return_value = {"OPENSETTING": "HOME/1/5,SETTING/1/1"}
+
+        result = self.controller.read_excel_commands("alias_mix.xlsx", target_row=1)
+
+        self.assertEqual(result["commands"], ["HOME/1/5", "SETTING/1/1", "OK/1/1"])
+
+    @mock.patch("backend.app.utils.adb_controller.load_command_aliases")
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_keeps_unresolved_alias_name_in_error(
+        self, mock_read_excel, mock_load_aliases
+    ):
+        # 字典里没有的名字不特殊处理，照旧走既有报错路径
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "OPENSETTINGG/1/1", "preScript": "", "testID": "TC-TYPO"},
+        ])
+        mock_load_aliases.return_value = {"OPENSETTING": "HOME/1/5"}
+
+        result = self.controller.read_excel_commands("alias_typo.xlsx")
+
+        self.assertEqual(result["valid_rows"], [])
+        self.assertEqual(result["skipped_rows"][0]["reason"], "存在未识别按键: OPENSETTINGG")
+
+    @mock.patch("backend.app.utils.adb_controller.load_command_aliases")
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_exposes_display_and_offset_mapping(
+        self, mock_read_excel, mock_load_aliases
+    ):
+        # 前端照 display_commands 显示（逻辑名就显示逻辑名），再借 command_offsets
+        # 把执行中按按键名匹配到的高亮映射回用户实际写的那一条
+        mock_read_excel.return_value = pd.DataFrame([
+            {
+                "runOption": "Y",
+                "oriStep": "OPENCHILDCODE/1/3,DOWN/1/1",
+                "preScript": "OK/1/1",
+                "testID": "TC-DISPLAY",
+            },
+        ])
+        mock_load_aliases.return_value = {
+            "OPENCHILDCODE": "HOME/1/5,SETTING/1/1,DOWN/9/1,OK/1/1"
+        }
+
+        result = self.controller.read_excel_commands("alias_display.xlsx", target_row=1)
+        row = result["valid_rows"][0]
+
+        self.assertEqual(
+            row["commands"],
+            ["HOME/1/5", "SETTING/1/1", "DOWN/9/1", "OK/1/3", "DOWN/1/1", "OK/1/1"],
+        )
+        self.assertEqual(
+            row["display_commands"], ["OPENCHILDCODE/1/3", "DOWN/1/1", "OK/1/1"]
+        )
+        # 逻辑名展开出 4 条，后两段各 1 条；offsets 是各段在 commands 里的结束下标
+        self.assertEqual(row["command_offsets"], [4, 5, 6])
+
+    @mock.patch("backend.app.utils.adb_controller.load_command_aliases")
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_offsets_stay_aligned_without_aliases(
+        self, mock_read_excel, mock_load_aliases
+    ):
+        # 没有别名字典时映射退化成一对一，前端行为与改动前一致
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "HOME/1/1,OK/1/1", "preScript": "BACK/1/1", "testID": "TC-PLAIN"},
+        ])
+        mock_load_aliases.return_value = {}
+
+        row = self.controller.read_excel_commands("plain.xlsx", target_row=1)["valid_rows"][0]
+
+        self.assertEqual(row["commands"], ["HOME/1/1", "OK/1/1", "BACK/1/1"])
+        self.assertEqual(row["display_commands"], ["HOME/1/1", "OK/1/1", "BACK/1/1"])
+        self.assertEqual(row["command_offsets"], [1, 2, 3])
+
+    def test_flatten_grouped_commands_returns_cumulative_offsets(self):
+        grouped = [
+            ("OPENCHILDCODE/1/3", ["HOME/1/5", "OK/1/3"]),
+            ("DOWN/1/1", ["DOWN/1/1"]),
+        ]
+
+        self.assertEqual(
+            _flatten_grouped_commands(grouped),
+            (
+                ["HOME/1/5", "OK/1/3", "DOWN/1/1"],
+                ["OPENCHILDCODE/1/3", "DOWN/1/1"],
+                [2, 3],
+            ),
+        )
+        self.assertEqual(_flatten_grouped_commands([]), ([], [], []))
 
 
 class ParseRepeatCountTests(unittest.TestCase):
@@ -280,6 +400,17 @@ class ReadExcelCommandsRandomRepeatTests(unittest.TestCase):
         result = self.controller.read_excel_commands("ttstxt.xlsx")
 
         self.assertEqual(result["valid_rows"][0]["tts_text"], "hello world")
+
+    @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
+    def test_read_excel_commands_reads_tvm_column_as_tts_reference(self, mock_read_excel):
+        # 现行模板用 N 列（表头 tvm）作 TTS 参考文本，供设备日志未捕获 TTS 输出时兜底比对
+        mock_read_excel.return_value = pd.DataFrame([
+            {"runOption": "Y", "oriStep": "OK/1/1", "preScript": "", "testID": "TC-001", "tvm": "volume Twenty Four"}
+        ])
+
+        result = self.controller.read_excel_commands("tvm.xlsx")
+
+        self.assertEqual(result["valid_rows"][0]["tts_text"], "volume Twenty Four")
 
     @mock.patch("backend.app.utils.adb_controller.pd.read_excel")
     def test_read_excel_commands_ttstxt_empty_when_column_missing(self, mock_read_excel):
@@ -710,6 +841,107 @@ class CommandExecutionStopTests(unittest.TestCase):
                 {"status": "info", "message": "命令执行已停止"},
             ],
         )
+
+
+def _make_devices_scan_result(*serials: str) -> mock.Mock:
+    """构造 ``adb devices`` 的返回值，形状与真实输出一致。"""
+    stdout_lines = ["List of devices attached"]
+    stdout_lines.extend(f"{serial}\tdevice" for serial in serials)
+    return mock.Mock(returncode=0, stdout="\n".join(stdout_lines) + "\n", stderr="")
+
+
+class ListDevicesCacheTests(unittest.TestCase):
+    """``list_devices`` 的扫描结果复用与并发合并。
+
+    首页会在同一瞬间并发拉多次设备列表（Home / DeviceManagement / ExcelExecution
+    各一次），每次都要跑一遍 ``adb devices``；ADB server 异常时单次最坏 2×5s 超时
+    加 0.5s 重试间隔，并发几路就是几倍的等待。这些用例锁住"只扫一次"这个契约。
+    """
+
+    def setUp(self) -> None:
+        self.controller = ADBController()
+
+    def test_list_devices_repeated_call_within_ttl_scans_once(self) -> None:
+        with mock.patch(
+            "backend.app.utils.adb_controller.subprocess.run",
+            return_value=_make_devices_scan_result("device-123"),
+        ) as run:
+            first = self.controller.list_devices()
+            second = self.controller.list_devices()
+
+        self.assertEqual(first, ["device-123"])
+        self.assertEqual(second, ["device-123"])
+        self.assertEqual(run.call_count, 1)
+
+    def test_list_devices_empty_scan_is_cached_too(self) -> None:
+        """空结果同样复用：ADB 抖动时并发调用不该各等一遍完整超时。"""
+        with (
+            mock.patch("backend.app.utils.adb_controller.time.sleep"),
+            mock.patch(
+                "backend.app.utils.adb_controller.subprocess.run",
+                return_value=_make_devices_scan_result(),
+            ) as run,
+        ):
+            self.assertEqual(self.controller.list_devices(), [])
+            scans_after_first_call = run.call_count
+
+            self.controller.list_devices()
+            self.controller.list_devices()
+
+        self.assertEqual(run.call_count, scans_after_first_call)
+
+    def test_list_devices_expired_cache_scans_again(self) -> None:
+        with (
+            mock.patch("backend.app.utils.adb_controller.DEVICE_SCAN_CACHE_TTL_SECONDS", 0.0),
+            mock.patch(
+                "backend.app.utils.adb_controller.subprocess.run",
+                return_value=_make_devices_scan_result("device-123"),
+            ) as run,
+        ):
+            self.controller.list_devices()
+            self.controller.list_devices()
+
+        self.assertEqual(run.call_count, 2)
+
+    def test_list_devices_concurrent_calls_share_one_scan(self) -> None:
+        """三个并发调用只触发一次 ``adb devices``，且都拿到同一份结果。"""
+        scan_started = threading.Event()
+        release_scan = threading.Event()
+
+        def fake_run(command, **kwargs):
+            scan_started.set()
+            release_scan.wait(timeout=5)
+            return _make_devices_scan_result("device-123")
+
+        collected = []
+        with mock.patch(
+            "backend.app.utils.adb_controller.subprocess.run", side_effect=fake_run
+        ) as run:
+            workers = [
+                threading.Thread(target=lambda: collected.append(self.controller.list_devices()))
+                for _ in range(3)
+            ]
+            for worker in workers:
+                worker.start()
+            scan_started.wait(timeout=5)
+            release_scan.set()
+            for worker in workers:
+                worker.join(timeout=5)
+
+        self.assertEqual(collected, [["device-123"]] * 3)
+        self.assertEqual(run.call_count, 1)
+
+    def test_list_devices_returns_copy_of_cached_list(self) -> None:
+        """调用方就地修改返回值不得污染缓存。"""
+        with mock.patch(
+            "backend.app.utils.adb_controller.subprocess.run",
+            return_value=_make_devices_scan_result("device-123"),
+        ):
+            first = self.controller.list_devices()
+            first.append("device-999")
+            second = self.controller.list_devices()
+
+        self.assertEqual(second, ["device-123"])
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ class CaptureCardService:
 
     DEVICE_SCAN_RANGE = 10
     READER_IDLE_TIMEOUT = 8.0  # 多久没人来取就把 capture / 线程释放掉
+    # 打开失败的最常见原因：设备被 OBS 等程序独占（DirectShow 设备无法并发打开）
+    DEVICE_OPEN_FAILED_HINT = "设备可能被 OBS 等其他程序独占，或已断开连接"
 
     def __init__(self) -> None:
         self._cap = None
@@ -161,7 +163,7 @@ class CaptureCardService:
         if not cap or not cap.isOpened():
             if cap is not None:
                 cap.release()
-            raise RuntimeError(f"无法打开采集卡设备: {device_id}")
+            raise RuntimeError(f"无法打开采集卡设备: {device_id}（{self.DEVICE_OPEN_FAILED_HINT}）")
 
         # 优先设 FourCC（影响驱动输出的像素格式 + 带宽，必须在分辨率/帧率之前）
         fourcc_value = self._fourcc_from_str(getattr(settings, "CAPTURE_CARD_FOURCC", ""))
@@ -486,7 +488,7 @@ class CaptureCardService:
         time.sleep(0.2)
 
         if not self._probe_device(normalized_id, api_preference):
-            raise RuntimeError(f"无法打开采集卡设备: {normalized_id}")
+            raise RuntimeError(f"无法打开采集卡设备: {normalized_id}（{self.DEVICE_OPEN_FAILED_HINT}）")
 
         from ..runtime import set_capture_card_device
 

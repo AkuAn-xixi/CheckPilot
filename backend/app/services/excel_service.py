@@ -4,10 +4,11 @@ from copy import copy
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Mapping
 from openpyxl import load_workbook
 from ..config import settings
 from ..utils.adb_controller import ADBController, get_keycode_map, get_custom_commands, NON_EXECUTABLE_KEYS
+from ..utils.command_aliases import expand_command_aliases, load_command_aliases, split_command_segments
 from ...FieldValidation import get_valid_keys as get_runtime_valid_keys
 from ..utils.validators import ExcelValidator
 from ..utils.path_resolver import list_excel_files, resolve_excel_file
@@ -1179,8 +1180,13 @@ class ExcelService:
             raise Exception(f"写入 preScript 失败: {e}")
 
     @staticmethod
-    def _check_invalid_keys(ori_step: str, pre_script: str) -> List[Dict[str, str]]:
-        """检查步骤文本中的按键名称是否合法，返回不合法按键列表。"""
+    def _check_invalid_keys(
+        ori_step: str, pre_script: str, aliases: Mapping[str, str]
+    ) -> List[Dict[str, str]]:
+        """检查步骤文本中的按键名称是否合法，返回不合法按键列表。
+
+        逻辑名（指令别名）按展开后的真实按键串校验，本身不算非法按键。
+        """
         valid_keys = {str(k).strip().upper() for k in get_runtime_valid_keys() if str(k).strip()}
         keycode_keys = {
             str(k).strip().upper()
@@ -1192,10 +1198,7 @@ class ExcelService:
         invalid = []
         seen = set()
         for text in [ori_step or '', pre_script or '']:
-            for cmd in text.split(','):
-                cmd = cmd.strip()
-                if not cmd:
-                    continue
+            for cmd in expand_command_aliases(split_command_segments(text), aliases):
                 parts = cmd.split('/')
                 if len(parts) < 1:
                     continue
@@ -1290,7 +1293,9 @@ class ExcelService:
             workbook.close()
 
             # 保存后校验按键合法性
-            invalid_keys = self._check_invalid_keys(ori_step, pre_script)
+            invalid_keys = self._check_invalid_keys(
+                ori_step, pre_script, load_command_aliases(file_path)
+            )
 
             result = {
                 "status": "ok",
